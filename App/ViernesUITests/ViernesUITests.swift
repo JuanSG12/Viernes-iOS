@@ -43,10 +43,11 @@ final class ViernesUITests: XCTestCase {
         app.buttons["toggle-keyboard"].tap()
         let input = field(app, "text-input")
         XCTAssertTrue(input.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["send"].isEnabled)
+        // Id propio: la tecla «send» del teclado del sistema también se llama «send» y haría la búsqueda ambigua.
+        XCTAssertFalse(app.buttons["send-message"].isEnabled)
         input.tap()
         input.typeText("hola")
-        XCTAssertTrue(app.buttons["send"].isEnabled)
+        XCTAssertTrue(app.buttons["send-message"].isEnabled)
     }
 
     func testTypedMessageAppearsInConversation() {
@@ -56,7 +57,7 @@ final class ViernesUITests: XCTestCase {
         XCTAssertTrue(input.waitForExistence(timeout: 3))
         input.tap()
         input.typeText("mensaje de prueba")
-        app.buttons["send"].tap()
+        app.buttons["send-message"].tap()
         XCTAssertTrue(app.staticTexts["mensaje de prueba"].waitForExistence(timeout: 5))
     }
 
@@ -126,6 +127,9 @@ final class ViernesUITests: XCTestCase {
         app.buttons["open-settings"].tap()
         app.buttons["settings-privacy"].tap()
         let erase = app.buttons["erase-all"]
+        // La lista es perezosa: el botón del final no existe en pantalla hasta que se desplaza.
+        var attempts = 0
+        while !erase.exists && attempts < 6 { app.swipeUp(); attempts += 1 }
         XCTAssertTrue(erase.waitForExistence(timeout: 5))
         erase.tap()
         XCTAssertTrue(app.buttons["Borrar memoria, historial y ajustes"].waitForExistence(timeout: 3))

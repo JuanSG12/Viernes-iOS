@@ -96,7 +96,9 @@ jobs:
           echo "Simulador: $UDID"
           xcrun simctl boot "$UDID" || true
 
-      - name: Compilar (sin firmar)
+      # Firma ad-hoc ("-"): sin firma el Keychain del simulador falla con el error -34018 (falta el entitlement
+      # application-identifier) y las pruebas de cifrado/persistencia no pueden correr.
+      - name: Compilar (firma ad-hoc)
         run: |
           set -o pipefail
           xcodebuild build-for-testing \
@@ -104,7 +106,8 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -skipMacroValidation -skipPackagePluginValidation \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build-${{ matrix.variant }}.log
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM= 2>&1 | tee build-${{ matrix.variant }}.log
 
       - name: Pruebas unitarias y de UI
         run: |

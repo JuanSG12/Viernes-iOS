@@ -168,7 +168,7 @@ struct MainView: View {
                     Button { model.sendTyped() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }
                         .foregroundStyle(Theme.cyan)
                         .disabled(model.typedDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .accessibilityLabel("Enviar").accessibilityIdentifier("send")
+                        .accessibilityLabel("Enviar mensaje").accessibilityIdentifier("send-message")
                 }
             }
             HStack(spacing: 28) {

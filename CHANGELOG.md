@@ -24,6 +24,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 - **CI de GitHub listo** (nunca ejecutado): jobs `static`, `core` y `app` en dos variantes (`no-mlx` / `full`) para aislar fallos de `MLXEngine.swift`; logs y `.xcresult` como artefactos; repositorio git local con el primer commit.
 - **Dos revisiones independientes de lectura** (core y app) aplicadas: manifiesto `Package.swift` (`.iOS("18.0")`), URLs solo ASCII, falsos positivos del filtro de sensibles y de la raíz de palabras, pausas de voz, carreras entre sesiones de reconocimiento y de síntesis, cancelación de confirmaciones, ciclo de vida (`inactive` ya no cancela respuestas), orden de arranque con Siri, bloqueo inicial de Memoria con Face ID, aislamiento de la clave de pruebas, ajustes de pruebas de UI.
 
+### Primera ejecución del CI de macOS (Xcode 26.6, simulador iPhone 17 Pro, iOS 26.2)
+- **Core**: `swift test` pasó (los jobs de la app solo arrancan si él pasa).
+- **App iOS**: **compila** en ambas variantes, incluida la de MLX (mlx-swift-lm 3.32.3, mlx-swift 0.32.3, swift-huggingface 0.13.0, swift-transformers 1.4.0).
+- **Pruebas unitarias**: 18 de 27 pasaron. Las 9 que fallaron lo hicieron por `unexpectedStatus(-34018)` del Keychain: la app se compiló sin firma y el simulador no concede Keychain a binarios sin firmar. Corrección: firma ad-hoc en el CI.
+- **Pruebas de UI**: 7 de 11 pasaron. Fallos: (1) `send` ambiguo con la tecla «send» del teclado → id propio `send-message`; (2) botón «Borrar todo» fuera de pantalla en una lista perezosa → la prueba desplaza; (3) alta de memoria, que dependía del Keychain.
+- **Defecto real encontrado por el CI**: al lanzar la app salía el aviso de permiso de micrófono sin haber usado la voz, porque `SpeechListener.teardown()` accedía a `inputNode`. Corregido: solo se toca si hubo un tap instalado.
+- Las correcciones están hechas y **pendientes de re-verificar** en el siguiente ciclo del CI.
+
 ### No verificado (pendiente)
 - **Ejecutar** las pruebas: en este equipo Defender (política administrada, evento 1121) bloquea ejecutar cualquier `.exe` nuevo, así que `swift test` no puede correr. Se ejecutarán en un Mac o con el CI incluido.
 - Compilación con Xcode 26 (en especial `MLXEngine.swift` y aislamiento de concurrencia en los puentes de audio).

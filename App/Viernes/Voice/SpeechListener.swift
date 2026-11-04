@@ -57,6 +57,7 @@ final class SpeechListener {
 
     /// Identifica la sesión de reconocimiento vigente: los callbacks tardíos de una sesión ya cerrada se ignoran.
     private var sessionID = 0
+    private var tapInstalled = false
     private var currentLocaleID = "es-CO"
     private var allowServerFallback = false
 
@@ -112,10 +113,11 @@ final class SpeechListener {
         guard format.sampleRate > 0, format.channelCount > 0 else { throw ListenerFailure.audio("No hay micrófono disponible.") }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tapBlock(request: request, box: box, id: id))
+        tapInstalled = true
 
         engine.prepare()
         do { try engine.start() } catch {
-            input.removeTap(onBus: 0)
+            removeTapIfInstalled()
             throw ListenerFailure.audio(error.localizedDescription)
         }
         task = recognizer.recognitionTask(with: request, resultHandler: Self.resultHandler(box, id: id))
@@ -152,13 +154,21 @@ final class SpeechListener {
         finishTimeoutTask = nil
         rotationTask = nil
         if engine.isRunning { engine.stop() }
-        engine.inputNode.removeTap(onBus: 0)
+        removeTapIfInstalled()
         request?.endAudio()
         task?.cancel()
         request = nil
         task = nil
         isRunning = false
         onLevel?(0)
+    }
+
+    /// Acceder a `engine.inputNode` sin haber pedido el micrófono puede disparar el aviso de permiso del sistema (y un error
+    /// de audio en simuladores). Solo se toca si este objeto instaló antes un tap, es decir, si el usuario ya activó la escucha.
+    private func removeTapIfInstalled() {
+        guard tapInstalled else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        tapInstalled = false
     }
 
     /// Al oír «Viernes» la MISMA sesión de reconocimiento pasa a modo comando: no se pierde lo que se diga a continuación.
@@ -181,7 +191,7 @@ final class SpeechListener {
 
     private func beginFinishing() {
         finishing = true
-        engine.inputNode.removeTap(onBus: 0)
+        removeTapIfInstalled()
         if engine.isRunning { engine.stop() }
         request?.endAudio()
         onLevel?(0)
