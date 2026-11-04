@@ -1,0 +1,4 @@
+# Saltos de línea LF en todo el repositorio: los scripts .sh y los workflows se ejecutan en macOS/Linux.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary

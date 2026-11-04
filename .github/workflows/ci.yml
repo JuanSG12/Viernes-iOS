@@ -1,0 +1,135 @@
+name: CI
+
+# Compila y prueba Viernes en runners de macOS de GitHub (el desarrollo se hizo en Windows y nunca se ha compilado la app).
+# Jobs:
+#   static   – comprobaciones estáticas (Linux, rápido)
+#   core     – `swift test` del paquete ViernesCore (la lógica; sin simulador)
+#   app      – XcodeGen + build + pruebas unitarias y de UI en simulador de iOS.
+#              Se ejecuta en DOS variantes para separar causas de fallo:
+#                full   = con MLX (mlx-swift-lm); el riesgo conocido es MLXEngine.swift
+#                no-mlx = sin MLX (solo Apple Intelligence); si esta pasa y `full` falla, el problema está en MLXEngine.swift
+# Los logs y los .xcresult se guardan como artefactos aunque falle.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Comprobaciones estáticas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Autoprueba del verificador y verificación
+        shell: pwsh
+        run: |
+          ./scripts/test-static-check.ps1
+          ./scripts/static-check.ps1
+
+  core:
+    name: Core (swift test)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versiones
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Pruebas del core
+        run: swift test 2>&1 | tee core-test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-test-log
+          path: core-test.log
+
+  app:
+    name: App iOS (${{ matrix.variant }})
+    runs-on: macos-26
+    needs: core
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [no-mlx, full]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versiones
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes | grep -i ios || true
+
+      - name: Instalar XcodeGen
+        run: brew install xcodegen
+
+      - name: Quitar MLX (variante no-mlx)
+        if: matrix.variant == 'no-mlx'
+        run: |
+          bash scripts/strip-mlx.sh project.yml > project.nomlx.yml
+          mv project.nomlx.yml project.yml
+          grep -c "MLX" project.yml || true
+
+      - name: Caché de paquetes de Swift
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
+          key: spm-${{ matrix.variant }}-${{ hashFiles('project.yml') }}
+
+      - name: Generar proyecto
+        run: xcodegen generate
+
+      - name: Elegir simulador de iPhone
+        id: sim
+        run: |
+          # Prefiere un iPhone moderno; si no, el primero disponible. Se usa el UDID (inequívoco).
+          LIST=$(xcrun simctl list devices available)
+          UDID=$(echo "$LIST" | grep -E "iPhone 1[6-9]( Pro| Plus| Pro Max)? \(" | head -1 | grep -oE "[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}" || true)
+          if [ -z "$UDID" ]; then UDID=$(echo "$LIST" | grep -E "iPhone .* \(" | head -1 | grep -oE "[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}"); fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Simulador: $UDID"
+          xcrun simctl boot "$UDID" || true
+
+      - name: Compilar (sin firmar)
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project Viernes.xcodeproj -scheme Viernes \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build-${{ matrix.variant }}.log
+
+      - name: Pruebas unitarias y de UI
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project Viernes.xcodeproj -scheme Viernes \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath build \
+            -resultBundlePath TestResults-${{ matrix.variant }}.xcresult \
+            2>&1 | tee test-${{ matrix.variant }}.log
+
+      - name: Resumen de errores (si falló)
+        if: failure()
+        run: |
+          echo "### Errores de compilación (${{ matrix.variant }})" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "error:" build-${{ matrix.variant }}.log | sort -u | head -40 | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+          echo "### Pruebas fallidas (${{ matrix.variant }})" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "Test Case .* failed|error:" test-${{ matrix.variant }}.log 2>/dev/null | sort -u | head -40 | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-${{ matrix.variant }}-logs
+          path: |
+            build-${{ matrix.variant }}.log
+            test-${{ matrix.variant }}.log
+            TestResults-${{ matrix.variant }}.xcresult
+          if-no-files-found: ignore

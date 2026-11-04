@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+build/
+# Generados por XcodeGen desde project.yml (se regeneran)
+App/Viernes/Info.plist
+# Secretos: jamás en el repositorio
+*.p12
+*.mobileprovision
+.env
