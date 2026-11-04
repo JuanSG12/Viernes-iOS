@@ -44,6 +44,30 @@ xcodebuild test -project Viernes.xcodeproj -scheme Viernes \
 
 (Ajusta el nombre del simulador al que tengas: `xcrun simctl list devices available`.)
 
+### CI en GitHub (compilar y probar sin Mac)
+
+El workflow `.github/workflows/ci.yml` ya está listo y el repositorio local tiene su primer commit. Falta **subirlo** (decisión tuya):
+
+```bash
+# 1) Crea un repositorio VACÍO en github.com (sin README ni .gitignore). Recomendado: privado.
+# 2) Desde la carpeta del proyecto:
+git remote add origin https://github.com/<tu-usuario>/<tu-repo>.git
+git push -u origin main
+```
+
+Luego, en la pestaña **Actions** del repositorio, el CI arranca solo. Jobs:
+
+| Job | Qué hace | Qué significa si falla |
+|---|---|---|
+| `static` (Linux) | Comprobaciones estáticas | Un cambio rompió una regla del proyecto |
+| `core` (macOS) | `swift test` del core | Falla lógica o de compilación en `ViernesCore` |
+| `app / no-mlx` (macOS) | XcodeGen + build + pruebas unitarias y de UI en simulador, **sin** MLX | Falla en la app (UI, voz, SwiftData, Siri…) |
+| `app / full` (macOS) | Lo mismo **con** MLX | Si `no-mlx` pasa y esta falla ⇒ el problema está en `MLXEngine.swift` o en las versiones de los paquetes |
+
+Los logs y los `.xcresult` quedan como **artefactos** de la ejecución y el resumen de errores aparece en la página del job. Si algo falla, pega aquí esos errores y se corrigen.
+
+**Costo**: en repositorios privados los minutos de macOS cuentan ×10 contra la cuota gratuita (≈200 minutos macOS al mes en un plan gratuito); en repositorios públicos son gratis. Cada ejecución completa gasta del orden de 20–40 minutos de macOS. El workflow cancela ejecuciones anteriores de la misma rama.
+
 ### Desde Windows (lo que sí se puede)
 
 ```powershell

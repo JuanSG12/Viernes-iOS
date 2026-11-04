@@ -21,6 +21,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 - Comprobaciones estáticas en Windows: delimitadores y cadenas balanceados en todos los archivos Swift; el core solo importa Foundation; sin claves/endpoints de Anthropic ni `UIBackgroundModes`; cada herramienta del catálogo tiene implementación y viceversa; los identificadores de las pruebas de UI existen en la app; los 9 documentos existen.
 
 - **Compilador real (Swift 6.4.2 para Windows, Visual Studio Build Tools)**: `ViernesCore` (22 archivos) compila y los 6 archivos de pruebas del core pasan el chequeo de tipos con XCTest (`scripts/typecheck-windows.ps1`). Se comprobó que el chequeo detecta errores deliberados.
+- **CI de GitHub listo** (nunca ejecutado): jobs `static`, `core` y `app` en dos variantes (`no-mlx` / `full`) para aislar fallos de `MLXEngine.swift`; logs y `.xcresult` como artefactos; repositorio git local con el primer commit.
 - **Dos revisiones independientes de lectura** (core y app) aplicadas: manifiesto `Package.swift` (`.iOS("18.0")`), URLs solo ASCII, falsos positivos del filtro de sensibles y de la raíz de palabras, pausas de voz, carreras entre sesiones de reconocimiento y de síntesis, cancelación de confirmaciones, ciclo de vida (`inactive` ya no cancela respuestas), orden de arranque con Siri, bloqueo inicial de Memoria con Face ID, aislamiento de la clave de pruebas, ajustes de pruebas de UI.
 
 ### No verificado (pendiente)
