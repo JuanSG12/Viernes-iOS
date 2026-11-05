@@ -13,6 +13,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner de macOS (macos-26 = arm64; macos-26-intel si arm64 está saturado)"
+        default: macos-26
+        type: choice
+        options: [macos-26, macos-26-intel]
 
 permissions:
   contents: read
@@ -36,7 +42,7 @@ jobs:
 
   core:
     name: Core (swift test)
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner || 'macos-26' }}
     steps:
       - uses: actions/checkout@v4
       - name: Versiones
@@ -53,7 +59,7 @@ jobs:
 
   app:
     name: App iOS (${{ matrix.variant }})
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner || 'macos-26' }}
     needs: core
     strategy:
       fail-fast: false
