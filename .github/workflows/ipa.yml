@@ -1,0 +1,68 @@
+name: IPA sin firmar
+
+# Genera Viernes.ipa SIN firmar para instalarlo en un iPhone con Sideloadly / AltStore (Apple ID gratuito).
+# iOS no instala apps sin firmar: Sideloadly la firma en tu PC con tu Apple ID. No se guardan claves ni certificados aquí.
+# Se lanza a mano: Actions > "IPA sin firmar" > Run workflow. El .ipa queda como artefacto de la ejecución.
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner de macOS (macos-26 = arm64; macos-26-intel si arm64 está saturado)"
+        default: macos-26
+        type: choice
+        options: [macos-26, macos-26-intel]
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    name: Compilar .ipa
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar XcodeGen
+        run: brew install xcodegen
+
+      - name: Generar proyecto
+        run: xcodegen generate
+
+      # Sin firma: el entitlement increased-memory-limit y el Team no existen para una cuenta gratuita;
+      # Sideloadly firma después con el Apple ID del usuario.
+      - name: Compilar para iPhone (Release, sin firma)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Viernes.xcodeproj -scheme Viernes \
+            -configuration Release -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM= 2>&1 | tee build-ipa.log
+
+      - name: Empaquetar Viernes.ipa
+        run: |
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "Viernes.app" | head -1)
+          test -n "$APP" || { echo "No se encontró Viernes.app"; exit 1; }
+          rm -rf Payload Viernes.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry Viernes.ipa Payload
+          ls -lh Viernes.ipa
+          # Comprobación básica de que es un binario de iPhone (arm64)
+          lipo -info "$APP/Viernes" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Viernes-ipa-sin-firmar
+          path: Viernes.ipa
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ipa-build-log
+          path: build-ipa.log
+          if-no-files-found: ignore
