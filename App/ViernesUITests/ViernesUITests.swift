@@ -19,6 +19,15 @@ final class ViernesUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
+    /// En runners lentos el primer toque a veces no enfoca el campo («has keyboard focus»): se reintenta hasta que aparece el teclado.
+    private func typeText(_ text: String, into element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<3 {
+            element.tap()
+            if app.keyboards.firstMatch.waitForExistence(timeout: 4) { break }
+        }
+        element.typeText(text)
+    }
+
     func testOnboardingExplainsThenStarts() {
         let app = launch(skipOnboarding: false)
         let start = app.buttons["onboarding-start"]
@@ -45,8 +54,7 @@ final class ViernesUITests: XCTestCase {
         XCTAssertTrue(input.waitForExistence(timeout: 3))
         // Id propio: la tecla «send» del teclado del sistema también se llama «send» y haría la búsqueda ambigua.
         XCTAssertFalse(app.buttons["send-message"].isEnabled)
-        input.tap()
-        input.typeText("hola")
+        typeText("hola", into: input, in: app)
         XCTAssertTrue(app.buttons["send-message"].isEnabled)
     }
 
@@ -55,8 +63,7 @@ final class ViernesUITests: XCTestCase {
         app.buttons["toggle-keyboard"].tap()
         let input = field(app, "text-input")
         XCTAssertTrue(input.waitForExistence(timeout: 3))
-        input.tap()
-        input.typeText("mensaje de prueba")
+        typeText("mensaje de prueba", into: input, in: app)
         app.buttons["send-message"].tap()
         XCTAssertTrue(app.staticTexts["mensaje de prueba"].waitForExistence(timeout: 5))
     }
@@ -104,8 +111,7 @@ final class ViernesUITests: XCTestCase {
         add.tap()
         let text = field(app, "memory-text")
         XCTAssertTrue(text.waitForExistence(timeout: 3))
-        text.tap()
-        text.typeText("Prefiero respuestas cortas")
+        typeText("Prefiero respuestas cortas", into: text, in: app)
         app.buttons["memory-save"].tap()
         let row = app.buttons.containing(NSPredicate(format: "label CONTAINS 'Prefiero respuestas cortas'")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
@@ -117,8 +123,7 @@ final class ViernesUITests: XCTestCase {
         app.buttons["Añadir recuerdo"].tap()
         let text = field(app, "memory-text")
         XCTAssertTrue(text.waitForExistence(timeout: 3))
-        text.tap()
-        text.typeText("mi contraseña es hunter2")
+        typeText("mi contraseña es hunter2", into: text, in: app)
         XCTAssertFalse(app.buttons["memory-save"].isEnabled)
     }
 

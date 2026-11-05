@@ -149,7 +149,7 @@ $literals = [regex]::Matches($uiTests, '(?:buttons|textFields|switches|otherElem
 $literals += [regex]::Matches($uiTests, '\(id: "([^"]+)", title: "([^"]+)"\)|\("(settings-[a-z]+)", "([^"]+)"\)') | ForEach-Object { $_.Groups[1].Value, $_.Groups[2].Value, $_.Groups[3].Value, $_.Groups[4].Value } | Where-Object { $_ }
 $literals += [regex]::Matches($uiTests, 'field\(app, "([^"]+)"\)') | ForEach-Object { $_.Groups[1].Value }
 $literals += [regex]::Matches($uiTests, 'for id in \[([^\]]+)\]') | ForEach-Object { [regex]::Matches($_.Groups[1].Value, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value } }
-$typed = [regex]::Matches($uiTests, 'typeText\("([^"]+)"\)') | ForEach-Object { $_.Groups[1].Value }   # texto que la prueba escribe, no identificadores
+$typed = [regex]::Matches($uiTests, 'typeText\("([^"]+)"[,)]') | ForEach-Object { $_.Groups[1].Value }   # texto que la prueba escribe, no identificadores
 $literals = $literals | Where-Object { $typed -notcontains $_ }
 $uiBad = 0
 foreach ($lit in ($literals | Sort-Object -Unique)) {
