@@ -26,6 +26,25 @@ final class CloudAndWeatherTests: XCTestCase {
         XCTAssertEqual(messages.first?["content"], "Eres Viernes.")
     }
 
+    func testReasoningModelsGetLowEffortAndOthersDoNot() throws {
+        func body(_ model: String) throws -> [String: Any] {
+            let data = try OpenAIChatProtocol.requestBody(model: model, system: "s", turns: [ChatTurn(role: .user, content: "hola")], maxTokens: 1500, temperature: 0.6)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        XCTAssertEqual(try body("openai/gpt-oss-120b")["reasoning_effort"] as? String, "low")
+        XCTAssertEqual(try body("openai/gpt-oss-20b")["reasoning_effort"] as? String, "low")
+        XCTAssertNil(try body("gemini-2.5-flash")["reasoning_effort"], "Otros modelos rechazarían el parámetro")
+        XCTAssertNil(try body("llama-x")["reasoning_effort"])
+        XCTAssertGreaterThanOrEqual(OpenAIChatProtocol.minimumCloudTokens, 1_000)
+        XCTAssertEqual(CloudProviders.groq.defaultModel, "openai/gpt-oss-120b")
+    }
+
+    func testPersonaTellsTheModelToActWithoutAskingForTextConfirmation() {
+        let prompt = Persona.systemPrompt(PersonaContext(engine: ModelCatalog.cloudDescriptor, claudeMode: .openApp))
+        XCTAssertTrue(prompt.contains("DE INMEDIATO"))
+        XCTAssertTrue(prompt.contains("hoja de confirmación"))
+    }
+
     func testErrorMessagesAreInSpanishAndNeverLeakSecrets() {
         let auth = OpenAIChatProtocol.errorMessage(status: 401, body: #"{"error":{"message":"Invalid API Key sk-secret"}}"#, provider: "Groq", model: "m")
         XCTAssertTrue(auth.contains("rechazó la clave"))

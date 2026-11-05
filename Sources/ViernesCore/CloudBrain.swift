@@ -25,7 +25,7 @@ public enum CloudProviders {
     public static let groq = CloudProviderPreset(
         id: "groq", displayName: "Groq",
         baseURL: "https://api.groq.com/openai/v1",
-        defaultModel: "llama-3.3-70b-versatile",
+        defaultModel: "openai/gpt-oss-120b",
         keyPageURL: "https://console.groq.com/keys",
         note: "Muy rápido. Plan gratuito sin tarjeta, con límites por minuto y por día que fija Groq (consúltalos en su consola)."
     )
@@ -89,15 +89,25 @@ public enum OpenAIChatProtocol {
         for turn in turns {
             messages.append(["role": turn.role == .user ? "user" : "assistant", "content": turn.content])
         }
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "messages": messages,
             "stream": true,
             "max_tokens": maxTokens,
             "temperature": temperature
         ]
+        if usesHiddenReasoning(model: model) { body["reasoning_effort"] = "low" }
         return try JSONSerialization.data(withJSONObject: body)
     }
+
+    /// Modelos que «piensan» antes de contestar (p. ej. gpt-oss). Ese razonamiento gasta `max_tokens` y puede dejar la
+    /// respuesta visible vacía; se pide el esfuerzo mínimo. Solo a estos modelos: otros rechazarían el parámetro.
+    public static func usesHiddenReasoning(model: String) -> Bool {
+        model.lowercased().contains("gpt-oss")
+    }
+
+    /// Margen mínimo de tokens para la nube: el razonamiento oculto cuenta contra el límite y 512 se agotaba antes de responder.
+    public static let minimumCloudTokens = 1_500
 
     /// Interpreta una línea del flujo `text/event-stream`.
     public static func parseStreamLine(_ line: String) -> StreamChunk {

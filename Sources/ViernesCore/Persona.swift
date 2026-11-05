@@ -79,7 +79,10 @@ public enum Persona {
             \(toolOpen){"name":"nombre_herramienta","args":{"clave":"valor"}}\(toolClose)
             Después detente. El sistema ejecutará la acción y te responderá con un mensaje que empieza por \(resultMarker); \
             solo entonces cuéntale al usuario qué pasó. Usa una herramienta solo cuando el usuario lo pida o sea claramente \
-            lo que quiere; si dudas de un dato (fecha, nombre), pregunta antes. No inventes herramientas.
+            lo que quiere; si falta un dato imprescindible (fecha, nombre), pregunta solo por ese dato. Cuando el usuario \
+            pide algo explícito («pregúntale a Claude…», «abre…», «recuérdame…»), llama a la herramienta DE INMEDIATO: no \
+            pidas confirmación por texto, porque la app ya le muestra una hoja de confirmación en las acciones sensibles. \
+            No inventes herramientas.
             """)
         }
 

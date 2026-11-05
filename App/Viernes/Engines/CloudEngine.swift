@@ -51,7 +51,7 @@ final class CloudEngine: LanguageModelEngine, @unchecked Sendable {
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     urlRequest.httpBody = try OpenAIChatProtocol.requestBody(
                         model: self.settings.model, system: request.system, turns: request.turns,
-                        maxTokens: request.maxTokens, temperature: request.temperature)
+                        maxTokens: max(request.maxTokens, OpenAIChatProtocol.minimumCloudTokens), temperature: request.temperature)
 
                     let (bytes, response) = try await self.session.bytes(for: urlRequest)
                     guard let http = response as? HTTPURLResponse else {
