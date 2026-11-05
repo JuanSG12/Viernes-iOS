@@ -57,7 +57,13 @@ struct ConversationDetailView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(snapshot.messages) { MessageBubble(message: $0) }
+                ForEach(snapshot.messages) { message in
+                    if message.role == .user {
+                        UserBubble(text: message.text)
+                    } else {
+                        AssistantMessage(message: message, isLast: false)
+                    }
+                }
             }
             .padding()
         }
