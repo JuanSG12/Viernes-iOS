@@ -19,7 +19,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # En main nunca se cancela una ejecución a medias (los runners de macOS tardan y se perdían los resultados).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   static:
