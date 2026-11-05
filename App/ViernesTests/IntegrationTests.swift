@@ -94,6 +94,7 @@ final class IntegrationTests: XCTestCase {
 
     func testClaudeDisabledModeRefusesAndIgnoresUnsolicitedResults() async {
         let coordinator = ClaudeCoordinator()
+        coordinator.config = ClaudeBridgeConfig(mode: .disabled)      // el valor por defecto ahora es .openApp
         var received: [String] = []
         coordinator.onResult = { _, answer in received.append(answer) }
         let outcome = await coordinator.ask("hola")
@@ -171,7 +172,11 @@ final class IntegrationTests: XCTestCase {
         let model = try makeModel()
         XCTAssertEqual(model.displayState, .disconnected)          // aún sin cerebro cargado
         XCTAssertFalse(model.settings.wakeWordEnabled)
-        XCTAssertEqual(model.settings.claude.mode, .disabled)
+        XCTAssertEqual(model.settings.claude.mode, .openApp)       // sin Atajos que configurar; cada envío pide confirmación
+        // Lo que saca texto del teléfono es opt-in: apagado por defecto.
+        XCTAssertNil(model.settings.cloud)
+        XCTAssertFalse(model.activeModel.isCloud)
+        XCTAssertNil(model.settings.voice.elevenLabs)
         XCTAssertFalse(model.wakeWordActive)
         XCTAssertTrue(model.messages.isEmpty)
     }
