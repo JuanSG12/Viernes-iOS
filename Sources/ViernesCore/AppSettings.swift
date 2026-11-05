@@ -57,6 +57,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var onboardingCompleted: Bool
     /// Cerebro en la nube. Opcional a propósito: los ajustes guardados por versiones anteriores no lo tienen y deben seguir leyéndose.
     public var cloud: CloudBrainSettings?
+    /// Permisos de lectura que el usuario debe activar expresamente. Opcionales por la misma razón que `cloud`.
+    public var calendarRead: Bool?
+    public var contactsRead: Bool?
+
+    public var calendarReadEnabled: Bool { calendarRead ?? false }
+    public var contactsReadEnabled: Bool { contactsRead ?? false }
 
     public static let `default` = AppSettings(
         selectedModelID: nil, claude: ClaudeBridgeConfig(), voice: .default, memory: .default,
@@ -68,8 +74,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(selectedModelID: String?, claude: ClaudeBridgeConfig, voice: VoiceSettings, memory: MemoryPolicy,
                 transcriptRetention: TranscriptRetention, wakeWordEnabled: Bool, continuousConversation: Bool,
                 recognitionLocale: String, allowServerRecognition: Bool, requireBiometricsForMemory: Bool,
-                reducedEffects: Bool, hapticsEnabled: Bool, onboardingCompleted: Bool, cloud: CloudBrainSettings? = nil) {
+                reducedEffects: Bool, hapticsEnabled: Bool, onboardingCompleted: Bool, cloud: CloudBrainSettings? = nil,
+                calendarRead: Bool? = nil, contactsRead: Bool? = nil) {
         self.cloud = cloud
+        self.calendarRead = calendarRead
+        self.contactsRead = contactsRead
         self.allowServerRecognition = allowServerRecognition
         self.selectedModelID = selectedModelID
         self.claude = claude

@@ -75,7 +75,11 @@ targets:
         NSRemindersFullAccessUsageDescription: >-
           Para crear, listar y completar recordatorios cuando tú se lo pidas y confirmes.
         NSCalendarsWriteOnlyAccessUsageDescription: >-
-          Para crear eventos en tu calendario cuando tú se lo pidas y confirmes. Viernes no lee tus eventos.
+          Para crear eventos en tu calendario cuando tú se lo pidas y confirmes. Por defecto Viernes no lee tus eventos.
+        NSCalendarsFullAccessUsageDescription: >-
+          Solo si activas «Permitir que Viernes lea mi calendario» en Privacidad: para leer tus eventos cuando se lo pidas y confirmes, por ejemplo «¿qué tengo mañana?».
+        NSContactsUsageDescription: >-
+          Solo si activas «Permitir que Viernes lea mis contactos» en Privacidad: para buscar el correo o el teléfono de una persona cuando se lo pidas y confirmes.
         NSFaceIDUsageDescription: >-
           Para proteger la pantalla de Memoria con Face ID si activas esa opción.
         CFBundleURLTypes:

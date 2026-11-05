@@ -1,5 +1,6 @@
 import UIKit
 import EventKit
+import Contacts
 import ViernesCore
 
 /// Ejecuta las herramientas permitidas por iOS. Cada resultado describe lo que REALMENTE ocurrió (o por qué no).
@@ -23,6 +24,11 @@ final class DeviceToolExecutor: ToolExecutor {
         case "device_info": return deviceInfo(what: (call.args["what"] ?? "all").lowercased())
         case "ask_claude": return await claude.ask(call.args["prompt"] ?? "")
         case "get_weather": return await weather(city: call.args["city"] ?? "")
+        case "list_events": return await listEvents(date: call.args["date"] ?? "today", days: Int(call.args["days"] ?? "") ?? 1)
+        case "find_contact": return await findContact(name: call.args["name"] ?? "")
+        case "compose_email": return await composeEmail(call.args)
+        case "compose_message": return await composeMessage(call.args)
+        case "call_phone": return await callPhone(call.args["number"] ?? "")
         default: return .failure("Herramienta no implementada: \(call.name).")
         }
     }
@@ -178,6 +184,109 @@ final class DeviceToolExecutor: ToolExecutor {
         } catch {
             return .failure("Error al crear el evento: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: Lectura de calendario y contactos (solo si el usuario lo activó en Privacidad; cada lectura pide confirmación)
+
+    private func listEvents(date: String, days: Int) async -> ToolOutcome {
+        guard let range = CalendarRange.resolve(date: date, days: days, now: Date()) else { return .failure("Fecha no válida.") }
+        do {
+            guard try await eventStore.requestFullAccessToEvents() else {
+                return .failure("No tengo permiso para leer el Calendario. Actívalo en Ajustes › Viernes › Calendarios.")
+            }
+            let predicate = eventStore.predicateForEvents(withStart: range.start, end: range.end, calendars: nil)
+            let events = eventStore.events(matching: predicate).sorted { $0.startDate < $1.startDate }
+            guard !events.isEmpty else { return .success("No hay eventos en ese rango.") }
+            let dayFormatter = DateFormatter()
+            dayFormatter.locale = Locale(identifier: "es_CO")
+            dayFormatter.dateFormat = "EEE d MMM"
+            let timeFormatter = DateFormatter()
+            timeFormatter.locale = Locale(identifier: "es_CO")
+            timeFormatter.dateFormat = "HH:mm"
+            let lines = events.prefix(25).map { event -> String in
+                let time = event.isAllDay ? "todo el día" : "\(timeFormatter.string(from: event.startDate))–\(timeFormatter.string(from: event.endDate))"
+                let place = (event.location ?? "").isEmpty ? "" : " en \(event.location ?? "")"
+                return "• \(dayFormatter.string(from: event.startDate)) \(time): \(event.title ?? "(sin título)")\(place)"
+            }
+            let more = events.count > 25 ? "\n(y \(events.count - 25) más)" : ""
+            return .success("Eventos (\(events.count)), en orden:\n" + lines.joined(separator: "\n") + more)
+        } catch {
+            return .failure("Error al leer el calendario: \(error.localizedDescription)")
+        }
+    }
+
+    private func findContact(name: String) async -> ToolOutcome {
+        let store = CNContactStore()
+        do {
+            guard try await store.requestAccess(for: .contacts) else {
+                return .failure("No tengo permiso para leer Contactos. Actívalo en Ajustes › Viernes › Contactos.")
+            }
+            let keys: [CNKeyDescriptor] = [CNContactGivenNameKey as CNKeyDescriptor, CNContactFamilyNameKey as CNKeyDescriptor,
+                                           CNContactEmailAddressesKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor]
+            let matches = try store.unifiedContacts(matching: CNContact.predicateForContacts(matchingName: name), keysToFetch: keys)
+            guard !matches.isEmpty else { return .success("No encontré contactos que coincidan con «\(name)».") }
+            let lines = matches.prefix(5).map { contact -> String in
+                let full = [contact.givenName, contact.familyName].filter { !$0.isEmpty }.joined(separator: " ")
+                let emails = contact.emailAddresses.map { String($0.value) }
+                let phones = contact.phoneNumbers.map { $0.value.stringValue }
+                var line = "• \(full.isEmpty ? "(sin nombre)" : full)"
+                if !emails.isEmpty { line += " — correo: \(emails.joined(separator: ", "))" }
+                if !phones.isEmpty { line += " — teléfono: \(phones.joined(separator: ", "))" }
+                return line
+            }
+            let note = matches.count > 1 ? "\nHay \(matches.count) coincidencias: si no es claro cuál es, pregunta al usuario." : ""
+            return .success("Contactos:\n" + lines.joined(separator: "\n") + note)
+        } catch {
+            return .failure("Error al leer los contactos: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: Borradores y llamadas (iOS no permite enviar sin que el usuario pulse Enviar)
+
+    /// Codifica un valor de URL con solo caracteres seguros: el texto del usuario no puede inyectar parámetros.
+    private func urlEncode(_ value: String, keep: String = "") -> String {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~" + keep)
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+    }
+
+    private func composeEmail(_ args: [String: String]) async -> ToolOutcome {
+        var query = ["body=\(urlEncode(args["body"] ?? ""))"]
+        if let subject = args["subject"] { query.insert("subject=\(urlEncode(subject))", at: 0) }
+        let recipient = urlEncode(args["to"] ?? "", keep: "@+")
+        guard let url = URL(string: "mailto:\(recipient)?\(query.joined(separator: "&"))") else { return .failure("No pude construir el borrador.") }
+        let opened = await UIApplication.shared.open(url)
+        return opened
+            ? .success("Abrí Correo con un borrador listo. TODAVÍA NO SE ENVIÓ: el usuario debe revisarlo y pulsar Enviar.")
+            : .failure("No pude abrir Correo. ¿Hay una cuenta configurada en la app Correo?")
+    }
+
+    private func composeMessage(_ args: [String: String]) async -> ToolOutcome {
+        let body = urlEncode(args["body"] ?? "")
+        let number = args["to"].flatMap { ContactFormat.normalizedPhone($0) }
+        let isWhatsApp = args["app"] == "whatsapp"
+        let urlString: String
+        if isWhatsApp {
+            let digits = (number ?? "").filter { $0.isNumber }
+            urlString = "whatsapp://send?" + (digits.isEmpty ? "" : "phone=\(digits)&") + "text=\(body)"
+        } else {
+            urlString = "sms:\(number.map { urlEncode($0, keep: "+") } ?? "")&body=\(body)"
+        }
+        guard let url = URL(string: urlString) else { return .failure("No pude construir el borrador.") }
+        let opened = await UIApplication.shared.open(url)
+        let appName = isWhatsApp ? "WhatsApp" : "Mensajes"
+        return opened
+            ? .success("Abrí \(appName) con un borrador listo. TODAVÍA NO SE ENVIÓ: el usuario debe revisarlo y pulsar Enviar.")
+            : .failure("No pude abrir \(appName)" + (isWhatsApp ? "; puede que WhatsApp no esté instalada." : "."))
+    }
+
+    private func callPhone(_ number: String) async -> ToolOutcome {
+        guard let phone = ContactFormat.normalizedPhone(number), let url = URL(string: "tel:\(urlEncode(phone, keep: "+"))") else {
+            return .failure("Número no válido.")
+        }
+        let opened = await UIApplication.shared.open(url)
+        return opened
+            ? .success("Abrí el marcador con \(phone). iOS pedirá confirmar antes de llamar; todavía no se llamó.")
+            : .failure("No pude abrir el marcador (los iPhone sin telefonía y el simulador no pueden llamar).")
     }
 
     // MARK: Dispositivo

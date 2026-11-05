@@ -122,6 +122,39 @@ public enum ToolCatalog {
             parameters: [ToolParameter("city", "Ciudad, p. ej. Bogotá o Medellín, Colombia")],
             risk: .safe),
         ToolDefinition(
+            name: "list_events",
+            summary: "Lee los eventos de tu calendario de un día o de varios días seguidos. Solo existe si el usuario activó «Permitir que Viernes lea mi calendario» en Privacidad.",
+            parameters: [
+                ToolParameter("date", "today, tomorrow o una fecha YYYY-MM-DD"),
+                ToolParameter("days", "Cuántos días leer, de 1 a 7 (por defecto 1)", required: false)
+            ], risk: .sensitive),
+        ToolDefinition(
+            name: "find_contact",
+            summary: "Busca un contacto por nombre y devuelve su correo y teléfonos. Solo existe si el usuario activó «Permitir que Viernes lea mis contactos» en Privacidad.",
+            parameters: [ToolParameter("name", "Nombre o apellido a buscar")],
+            risk: .sensitive),
+        ToolDefinition(
+            name: "compose_email",
+            summary: "Prepara un BORRADOR de correo en la app Correo. No envía nada: el usuario revisa y pulsa Enviar.",
+            parameters: [
+                ToolParameter("body", "Texto del correo"),
+                ToolParameter("to", "Dirección de correo del destinatario", required: false),
+                ToolParameter("subject", "Asunto", required: false)
+            ], risk: .sensitive),
+        ToolDefinition(
+            name: "compose_message",
+            summary: "Prepara un BORRADOR de mensaje (SMS/iMessage o WhatsApp). No envía nada: el usuario revisa y pulsa Enviar.",
+            parameters: [
+                ToolParameter("body", "Texto del mensaje"),
+                ToolParameter("to", "Teléfono del destinatario con prefijo, p. ej. +573001234567", required: false),
+                ToolParameter("app", "sms (por defecto) o whatsapp", required: false)
+            ], risk: .sensitive),
+        ToolDefinition(
+            name: "call_phone",
+            summary: "Abre el marcador del teléfono con un número. iOS pide su propia confirmación antes de llamar.",
+            parameters: [ToolParameter("number", "Número con prefijo, p. ej. +573001234567")],
+            risk: .sensitive),
+        ToolDefinition(
             name: "ask_claude",
             summary: "Envía una pregunta a la app de Claude del usuario (sale de Viernes; la respuesta no vuelve aquí salvo que exista un Atajo configurado).",
             parameters: [ToolParameter("prompt", "Pregunta completa para Claude")],

@@ -108,7 +108,9 @@ final class AppModel: ObservableObject {
         conversations = ConversationRepository(modelContainer: container)
         let executor = DeviceToolExecutor(claude: claude)
         conversation = ConversationEngine(engine: engine, memory: memoryStore, executor: executor, confirmer: confirmation,
-                                          config: ConversationConfig(memoryPolicy: loaded.memory, claudeMode: loaded.claude.mode))
+                                          config: ConversationConfig(memoryPolicy: loaded.memory, claudeMode: loaded.claude.mode,
+                                                                     calendarReadEnabled: loaded.calendarReadEnabled,
+                                                                     contactsReadEnabled: loaded.contactsReadEnabled))
         wireServices()
         memoryUnlocked = !loaded.requireBiometricsForMemory      // con Face ID exigido, la memoria arranca BLOQUEADA
     }
@@ -253,7 +255,8 @@ final class AppModel: ObservableObject {
     private func pushConversationConfig() async {
         await conversation.updateConfig(ConversationConfig(
             memoryPolicy: settings.memory, claudeMode: settings.claude.mode, spokenOutput: settings.voice.speakResponses,
-            historyCharBudget: activeModel.isCloud ? 14_000 : (activeModel.isSystemModel ? 4_500 : 6_000)
+            historyCharBudget: activeModel.isCloud ? 14_000 : (activeModel.isSystemModel ? 4_500 : 6_000),
+            calendarReadEnabled: settings.calendarReadEnabled, contactsReadEnabled: settings.contactsReadEnabled
         ))
     }
 
@@ -267,7 +270,8 @@ final class AppModel: ObservableObject {
         if settings.recognitionLocale != old.recognitionLocale {
             voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)
         }
-        if settings.memory != old.memory || settings.claude.mode != old.claude.mode || settings.voice.speakResponses != old.voice.speakResponses {
+        if settings.memory != old.memory || settings.claude.mode != old.claude.mode || settings.voice.speakResponses != old.voice.speakResponses
+            || settings.calendarReadEnabled != old.calendarReadEnabled || settings.contactsReadEnabled != old.contactsReadEnabled {
             Task { await pushConversationConfig() }
         }
         if settings.transcriptRetention != old.transcriptRetention {

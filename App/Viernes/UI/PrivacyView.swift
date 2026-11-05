@@ -28,6 +28,18 @@ struct PrivacyView: View {
             }
             .listRowBackground(Theme.carbon.opacity(0.5))
 
+            Section {
+                Toggle("Permitir que Viernes lea mi calendario", isOn: Binding(
+                    get: { model.settings.calendarReadEnabled }, set: { model.settings.calendarRead = $0 }))
+                    .accessibilityIdentifier("calendar-read")
+                Toggle("Permitir que Viernes lea mis contactos", isOn: Binding(
+                    get: { model.settings.contactsReadEnabled }, set: { model.settings.contactsRead = $0 }))
+                    .accessibilityIdentifier("contacts-read")
+            } header: { Text("Datos de tu iPhone") } footer: {
+                Text("Apagado por defecto. Por defecto Viernes solo puede AÑADIR eventos. Si lo activas, podrá leer eventos o buscar contactos cuando se lo pidas y cada lectura te pedirá confirmación. Lo que lea se entrega al cerebro activo: con el cerebro en la nube, también sale del teléfono.")
+            }
+            .listRowBackground(Theme.carbon.opacity(0.5))
+
             Section("Historial de conversaciones") {
                 Picker("Guardar transcripciones", selection: $model.settings.transcriptRetention) {
                     ForEach(TranscriptRetention.allCases, id: \.self) { Text($0.displayName).tag($0) }

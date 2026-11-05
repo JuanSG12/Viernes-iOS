@@ -78,6 +78,59 @@ public enum DateParsing {
     }
 }
 
+/// Formato de datos de contacto (puro y comprobable).
+public enum ContactFormat {
+    /// Dirección sencilla: una sola, sin espacios ni separadores múltiples.
+    public static func isValidEmail(_ text: String) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespaces)
+        guard value.count <= 254, !value.contains(","), !value.contains(";"), !value.contains(" ") else { return false }
+        let parts = value.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, parts[1].contains("."),
+              !parts[1].hasPrefix("."), !parts[1].hasSuffix(".") else { return false }
+        return true
+    }
+
+    /// Devuelve solo dígitos con un «+» inicial opcional (5–15 dígitos) o nil si no parece un teléfono.
+    public static func normalizedPhone(_ text: String) -> String? {
+        let allowed = CharacterSet(charactersIn: "+0123456789 ()-.")
+        guard text.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let digits = trimmed.filter { $0.isNumber }
+        guard (5...15).contains(digits.count) else { return nil }
+        if trimmed.hasPrefix("+") && trimmed.dropFirst().contains("+") { return nil }
+        if !trimmed.hasPrefix("+") && trimmed.contains("+") { return nil }
+        return (trimmed.hasPrefix("+") ? "+" : "") + digits
+    }
+}
+
+/// Rango de días para leer el calendario (puro y comprobable).
+public enum CalendarRange {
+    public static func isValidDateArgument(_ text: String) -> Bool {
+        let folded = text.lowercased()
+        if folded == "today" || folded == "tomorrow" { return true }
+        return DateParsing.parse(folded) != nil && folded.count == 10
+    }
+
+    /// Inicio (00:00 local) y fin (exclusivo) del rango pedido.
+    public static func resolve(date: String, days: Int, now: Date, calendar: Calendar = .current) -> (start: Date, end: Date)? {
+        let folded = date.lowercased()
+        let startOfToday = calendar.startOfDay(for: now)
+        let start: Date
+        switch folded {
+        case "today": start = startOfToday
+        case "tomorrow":
+            guard let next = calendar.date(byAdding: .day, value: 1, to: startOfToday) else { return nil }
+            start = next
+        default:
+            guard folded.count == 10, let parsed = DateParsing.parse(folded, timeZone: calendar.timeZone) else { return nil }
+            start = calendar.startOfDay(for: parsed)
+        }
+        let clamped = min(max(days, 1), 7)
+        guard let end = calendar.date(byAdding: .day, value: clamped, to: start) else { return nil }
+        return (start, end)
+    }
+}
+
 /// Validación estricta ANTES de ejecutar o pedir confirmación. Nada que venga del modelo se confía.
 public enum ToolValidator {
     public static let maxValueLength = 2_000
@@ -144,6 +197,28 @@ public enum ToolValidator {
             if let what = args["what"], !["battery", "storage", "time", "device", "all"].contains(what.lowercased()) {
                 throw fail("«what» debe ser battery, storage, time, device o all.")
             }
+        case "list_events":
+            guard CalendarRange.isValidDateArgument(args["date"]!) else {
+                throw fail("«date» debe ser today, tomorrow o una fecha YYYY-MM-DD.")
+            }
+            if let days = args["days"] {
+                guard let value = Int(days), (1...7).contains(value) else { throw fail("«days» debe estar entre 1 y 7.") }
+            }
+        case "find_contact":
+            guard args["name"]!.count <= 100 else { throw fail("el nombre es demasiado largo.") }
+        case "compose_email":
+            if let to = args["to"], !ContactFormat.isValidEmail(to) { throw fail("dirección de correo no válida.") }
+            if let subject = args["subject"], subject.count > 200 || subject.contains("\n") { throw fail("asunto no válido.") }
+        case "compose_message":
+            if let to = args["to"], ContactFormat.normalizedPhone(to) == nil { throw fail("teléfono no válido.") }
+            if let app = args["app"] {
+                let folded = app.lowercased()
+                guard ["sms", "whatsapp"].contains(folded) else { throw fail("«app» debe ser sms o whatsapp.") }
+                args["app"] = folded
+            }
+        case "call_phone":
+            guard let phone = ContactFormat.normalizedPhone(args["number"]!) else { throw fail("teléfono no válido.") }
+            args["number"] = phone
         case "get_weather":
             let city = args["city"]!
             guard city.count <= 80, !city.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {

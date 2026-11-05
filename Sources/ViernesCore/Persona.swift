@@ -83,7 +83,19 @@ public enum Persona {
             pide algo explícito («pregúntale a Claude…», «abre…», «recuérdame…»), llama a la herramienta DE INMEDIATO: no \
             pidas confirmación por texto, porque la app ya le muestra una hoja de confirmación en las acciones sensibles. \
             No inventes herramientas.
+
+            Peticiones de varios pasos: encadena herramientas. Primero consulta lo necesario y, con los datos REALES del \
+            resultado, actúa (p. ej. leer eventos y luego crear un recordatorio). Si dos consultas son independientes, \
+            pídelas juntas en la misma respuesta, una etiqueta por línea. Nunca inventes un dato que una herramienta debía \
+            darte; si falla o no hay permiso, dilo tal cual.
             """)
+            let names = Set(context.tools.map(\.name))
+            var missing: [String] = []
+            if !names.contains("list_events") { missing.append("leer el calendario («Permitir que Viernes lea mi calendario»)") }
+            if !names.contains("find_contact") { missing.append("buscar contactos («Permitir que Viernes lea mis contactos»)") }
+            if !missing.isEmpty {
+                sections.append("Permisos de lectura apagados: no puedes \(missing.joined(separator: " ni ")). Si el usuario lo pide, dile que lo active en Ajustes › Privacidad; no finjas haberlo hecho.")
+            }
         }
 
         switch context.claudeMode {

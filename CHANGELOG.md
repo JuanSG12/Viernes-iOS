@@ -17,9 +17,19 @@ La interfaz azul/cian se parecía demasiado a la de otros asistentes de IA. Se p
 ### Añadido en el motor (mínimo)
 - Evento `toolStarted` en `ConversationEngine`: la UI sabe cuándo una herramienta VA a ejecutarse (antes de confirmar), para animar el núcleo sin simular nada.
 
+### Agente y herramientas (ver AGENT_AND_AUTOMATION.md)
+- **Ejecución por rondas mejorada**: las herramientas seguras e independientes de una misma respuesta corren **en paralelo**; las sensibles y de memoria, una a una y con confirmación; los registros conservan el orden de las llamadas. **Un reintento** solo para fallos de red en herramientas seguras (nunca se repite una confirmación). Hasta **4 rondas** (antes 3) para encadenar consulta → acción → respuesta. Corregido: el motor describía al modelo todas las llamadas aunque solo ejecutara las primeras `maxCallsPerRound`.
+- **Herramientas nuevas** (todas sensibles, con confirmación): `list_events` (leer agenda), `find_contact` (Contactos), `compose_email`, `compose_message` (SMS/WhatsApp) y `call_phone`. Correo y mensajes son **borradores**: no se envía nada hasta que el usuario pulsa Enviar.
+- **Lectura de calendario y contactos: opt-in y apagada por defecto** (Privacidad). **Esto cambia la política anterior («Viernes no lee tus eventos»)** porque tu ejemplo («revisa mi agenda de mañana y recuérdame salir con tiempo») no es posible sin leerla. Con el interruptor apagado todo se comporta como antes, y el modelo sabe que no puede y lo dice. Nuevas claves de privacidad en `project.yml`.
+- El prompt ordena encadenar con datos reales y pedir juntas las consultas independientes.
+- 13 pruebas nuevas del núcleo (formatos, rango de calendario, validación, confirmaciones, permisos apagados, paralelismo, reintento, flujo agenda → recordatorio con dos confirmaciones, rechazo).
+- Documentación: `AGENT_AND_AUTOMATION.md` (agente, herramientas evaluadas y descartadas, plan de memoria, proactividad real de iOS) y `WINDOWS_AGENT.md` (**solo diseño**: sin puertos públicos, emparejamiento por QR, firma con Secure Enclave, lista blanca, auditoría).
+
 ### No verificado
 - Nada del rediseño se ha visto en un dispositivo ni en simulador: se escribió desde Windows. Solo se comprueba que compile y que los identificadores de las pruebas de UI sigan existiendo. Los riesgos son estéticos (proporciones, legibilidad, rendimiento del `Canvas` en un iPhone 14 Pro Max) y de compilación de SwiftUI.
 - Pendiente de este rediseño: tarjeta visual de clima con datos estructurados (hoy el resultado se muestra como texto en la tarjeta de acción).
+- Las herramientas nuevas (agenda, contactos, borradores, llamadas) se escribieron sin ejecutarlas en un iPhone: URLs de Correo/Mensajes/WhatsApp, permisos de EventKit/Contactos y el flujo completo con un modelo real están sin verificar.
+- Pendiente de las prioridades 8–9: memoria contextual (caducidad, entidades, búsqueda semántica), ubicación para «clima aquí», resumen de agenda como notificación. Solo están diseñadas en AGENT_AND_AUTOMATION.md.
 
 ## [0.2.0] — 2026-11-05 — Primeras pruebas en iPhone 14 Pro Max (sin verificar aún en dispositivo)
 

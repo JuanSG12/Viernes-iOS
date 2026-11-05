@@ -18,10 +18,17 @@ public struct ConversationConfig: Sendable {
     public var historyCharBudget: Int
     public var memoryContextLimit: Int
     public var timeZone: TimeZone
+    /// Permisos de lectura que el usuario activó EXPRESAMENTE en Privacidad (apagados por defecto).
+    public var calendarReadEnabled: Bool
+    public var contactsReadEnabled: Bool
 
+    /// 4 rondas = hasta 3 rondas de herramientas encadenadas (consultar → actuar → …) y una respuesta final.
     public init(memoryPolicy: MemoryPolicy = .default, claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true,
-                maxToolRounds: Int = 3, maxCallsPerRound: Int = 3, historyCharBudget: Int = 6_000,
-                memoryContextLimit: Int = 5, timeZone: TimeZone = .current) {
+                maxToolRounds: Int = 4, maxCallsPerRound: Int = 3, historyCharBudget: Int = 6_000,
+                memoryContextLimit: Int = 5, timeZone: TimeZone = .current,
+                calendarReadEnabled: Bool = false, contactsReadEnabled: Bool = false) {
+        self.calendarReadEnabled = calendarReadEnabled
+        self.contactsReadEnabled = contactsReadEnabled
         self.memoryPolicy = memoryPolicy
         self.claudeMode = claudeMode
         self.spokenOutput = spokenOutput
@@ -145,16 +152,9 @@ public actor ConversationEngine {
             let toolBlocks = filter.captured.filter { $0.open == Persona.toolOpen }
             if toolBlocks.isEmpty && filter.unterminatedBlocks == 0 { break }
 
-            var records: [ActionRecord] = []
-            for block in toolBlocks.prefix(config.maxCallsPerRound) {
-                guard let call = ToolCallParser.parse(block.content) else {
-                    records.append(ActionRecord(tool: "desconocida", summary: "Llamada de herramienta malformada",
-                                                outcome: .failed("El formato de la llamada no era válido."), date: clock()))
-                    continue
-                }
-                out.yield(.toolStarted(call.name))
-                records.append(await perform(call))
-            }
+            let executedBlocks = Array(toolBlocks.prefix(config.maxCallsPerRound))
+            var records: [ActionRecord] = await executeRound(executedBlocks, out)
+            if Task.isCancelled { return }
             if toolBlocks.isEmpty && filter.unterminatedBlocks > 0 && roundVisible.isEmpty {
                 records.append(ActionRecord(tool: "desconocida", summary: "Respuesta truncada",
                                             outcome: .failed("La respuesta del modelo se cortó."), date: clock()))
@@ -165,7 +165,7 @@ public actor ConversationEngine {
             if records.isEmpty || round == config.maxToolRounds - 1 { break }
 
             // Siguiente ronda: el modelo ve su propia llamada y el resultado REAL.
-            let rawAssistant = ([roundVisible] + toolBlocks.map { "\(Persona.toolOpen)\($0.content)\(Persona.toolClose)" })
+            let rawAssistant = ([roundVisible] + executedBlocks.map { "\(Persona.toolOpen)\($0.content)\(Persona.toolClose)" })
                 .filter { !$0.isEmpty }.joined(separator: "\n")
             turns.append(ChatTurn(role: .assistant, content: rawAssistant))
             turns.append(ChatTurn(role: .user, content: Persona.resultMarker + "\n" + records.map(Self.describe).joined(separator: "\n")))
@@ -182,11 +182,69 @@ public actor ConversationEngine {
         out.yield(.completed(message))
     }
 
+    // MARK: Ejecución de una ronda de herramientas
+
+    /// Fallos que pueden ser pasajeros (red): se reintenta UNA vez. Un «ciudad no encontrada» no se reintenta.
+    static func isTransientFailure(_ reason: String) -> Bool {
+        let folded = reason.lowercased()
+        return ["sin conexión", "no respondió", "tiempo de espera", "timed out", "tardó demasiado"].contains { folded.contains($0) }
+    }
+
+    /// Herramientas que se pueden lanzar a la vez sin riesgo: seguras, sin estado en el motor y con ejecutor del dispositivo.
+    private func isParallelSafe(_ call: ToolCall) -> Bool {
+        guard let definition = ToolCatalog.definition(named: call.name) else { return false }
+        return definition.risk == .safe && !ToolCatalog.memoryToolNames.contains(call.name)
+    }
+
+    /// Ejecuta las llamadas de una ronda. Las seguras e independientes corren en paralelo; las sensibles (con confirmación)
+    /// y las de memoria van una a una y en orden. Devuelve los registros en el orden original de las llamadas.
+    private func executeRound(_ blocks: [StreamingTagFilter.Captured], _ out: AsyncStream<ConversationEvent>.Continuation) async -> [ActionRecord] {
+        var parsed: [(index: Int, call: ToolCall)] = []
+        var slots: [ActionRecord?] = Array(repeating: nil, count: blocks.count)
+        for (index, block) in blocks.enumerated() {
+            if let call = ToolCallParser.parse(block.content) {
+                parsed.append((index, call))
+            } else {
+                slots[index] = ActionRecord(tool: "desconocida", summary: "Llamada de herramienta malformada",
+                                            outcome: .failed("El formato de la llamada no era válido."), date: clock())
+            }
+        }
+
+        let parallel = parsed.filter { isParallelSafe($0.call) }
+        if parallel.count > 1 {
+            for item in parallel { out.yield(.toolStarted(item.call.name)) }
+            await withTaskGroup(of: (Int, ActionRecord).self) { group in
+                for item in parallel {
+                    group.addTask { [self] in (item.index, await self.performWithRetry(item.call)) }
+                }
+                for await (index, record) in group { slots[index] = record }
+            }
+        }
+        let parallelIndexes = Set(parallel.count > 1 ? parallel.map { $0.index } : [])
+        for item in parsed where !parallelIndexes.contains(item.index) {
+            if Task.isCancelled { break }
+            out.yield(.toolStarted(item.call.name))
+            slots[item.index] = await performWithRetry(item.call)
+        }
+        return slots.compactMap { $0 }
+    }
+
+    private func performWithRetry(_ call: ToolCall) async -> ActionRecord {
+        var record = await perform(call)
+        if case .failed(let reason) = record.outcome, Self.isTransientFailure(reason), isParallelSafe(call), !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if !Task.isCancelled { record = await perform(call) }
+        }
+        return record
+    }
+
     // MARK: Herramientas
 
     func availableTools() -> [ToolDefinition] {
         ToolCatalog.all.filter { tool in
             if tool.name == "ask_claude" { return config.claudeMode != .disabled }
+            if tool.name == "list_events" { return config.calendarReadEnabled && executor != nil }
+            if tool.name == "find_contact" { return config.contactsReadEnabled && executor != nil }
             if ToolCatalog.memoryToolNames.contains(tool.name) { return config.memoryPolicy.enabled }
             return executor != nil
         }
@@ -305,6 +363,11 @@ public actor ConversationEngine {
         case "create_event": return "Crear evento"
         case "run_shortcut": return "Ejecutar Atajo"
         case "ask_claude": return "Enviar a Claude"
+        case "list_events": return "Leer tu calendario"
+        case "find_contact": return "Buscar en tus contactos"
+        case "compose_email": return "Preparar borrador de correo"
+        case "compose_message": return "Preparar borrador de mensaje"
+        case "call_phone": return "Abrir el marcador"
         case "save_memory": return "Guardar en memoria"
         case "forget_memory": return "Olvidar recuerdo"
         default: return "Confirmar acción"
@@ -326,6 +389,13 @@ public actor ConversationEngine {
         case "device_info": return "Consultar \(a["what"] ?? "all")"
         case "list_reminders": return "Listar recordatorios"
         case "get_weather": return "Clima en \(a["city"] ?? "")"
+        case "list_events": return "Eventos de \(a["date"] ?? "hoy")" + (a["days"].map { " (\($0) días)" } ?? "")
+        case "find_contact": return "Buscar «\(a["name"] ?? "")»"
+        case "compose_email":
+            return "Correo" + (a["to"].map { " para \($0)" } ?? "") + (a["subject"].map { " — \($0)" } ?? "") + ": «\(String((a["body"] ?? "").prefix(160)))»"
+        case "compose_message":
+            return "\(a["app"] == "whatsapp" ? "WhatsApp" : "Mensaje")" + (a["to"].map { " para \($0)" } ?? "") + ": «\(String((a["body"] ?? "").prefix(160)))»"
+        case "call_phone": return "Llamar al \(a["number"] ?? "")"
         default: return call.name
         }
     }
