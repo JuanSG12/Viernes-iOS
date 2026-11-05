@@ -31,7 +31,7 @@ Viernes es una asistente de voz **nativa de iOS** (Swift + SwiftUI) con cerebro 
 | Área | Escrito | Verificado |
 |---|---|---|
 | Lógica portable (`Sources/ViernesCore`: memoria, herramientas, conversación, política, VAD, wake word…) | ✅ | ✅ **compila y sus pruebas pasan el chequeo de tipos** con Swift 6.4.2 (Windows, `scripts/typecheck-windows.ps1`) · ⚠️ las pruebas **no se han ejecutado**: Defender (política de TI) bloquea ejecutar `.exe` recién compilados, así que `swift test` no corre aquí |
-| App iOS (SwiftUI, SwiftData cifrado, voz, Siri, herramientas) | ✅ | ✅ **compila** en el CI de macOS (Xcode 26.6, simulador iOS 26.2), con y sin MLX · ⚠️ primera ejecución de pruebas: 18 de 27 unitarias y 7 de 11 de UI pasaron; las 13 que fallaron se debían a la firma del simulador (Keychain), un id de botón ambiguo y una lista perezosa, ya corregidos y pendientes de re-verificar |
+| App iOS (SwiftUI, SwiftData cifrado, voz, Siri, herramientas) | ✅ | ✅ **compila** en el CI de macOS (Xcode 26.6, simulador iOS 26.2), con y sin MLX · ✅ **pasa el CI en simulador (iOS 26.2)**: 27 pruebas unitarias y 11 de UI, con y sin MLX |
 | Motor MLX (`MLXEngine.swift`) | ✅ | ✅ **compila** contra mlx-swift-lm 3.32.3 · ❌ no probado en dispositivo (descarga, memoria, velocidad) |
 | Motor Apple Intelligence | ✅ | ❌ no compilado ni probado en dispositivo |
 | Comprobaciones estáticas (`scripts/static-check.ps1`) | ✅ | ✅ ejecutadas en Windows: delimitadores balanceados en 67 archivos, core solo con Foundation, sin claves/endpoints de Anthropic, herramientas ↔ ejecutor, IDs de UI ↔ código, documentación |

@@ -30,7 +30,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 - **Pruebas unitarias**: 18 de 27 pasaron. Las 9 que fallaron lo hicieron por `unexpectedStatus(-34018)` del Keychain: la app se compiló sin firma y el simulador no concede Keychain a binarios sin firmar. Corrección: firma ad-hoc en el CI.
 - **Pruebas de UI**: 7 de 11 pasaron. Fallos: (1) `send` ambiguo con la tecla «send» del teclado → id propio `send-message`; (2) botón «Borrar todo» fuera de pantalla en una lista perezosa → la prueba desplaza; (3) alta de memoria, que dependía del Keychain.
 - **Defecto real encontrado por el CI**: al lanzar la app salía el aviso de permiso de micrófono sin haber usado la voz, porque `SpeechListener.teardown()` accedía a `inputNode`. Corregido: solo se toca si hubo un tap instalado.
-- Las correcciones están hechas y **pendientes de re-verificar** en el siguiente ciclo del CI.
+- Las correcciones se aplicaron y se **re-verificaron** (ver siguiente sección).
+
+### Segunda ejecución del CI (commit `102f897`) — todo en verde
+- Los 4 jobs pasan: estáticas, Core, App iOS (no-mlx) y App iOS (full, con MLX). `xcodebuild test` termina sin fallos en ambas variantes (27 unitarias + 11 de UI en simulador iOS 26.2).
+- La firma ad-hoc resolvió el Keychain (`-34018`); `send-message` y el scroll resolvieron las dos pruebas de UI; el aviso espurio de micrófono desapareció.
+- Una ejecución previa en runner Intel (macos-26-intel) mostró un fallo intermitente de enfoque de teclado en `testMemoryRefusesSensitiveText`; las pruebas que escriben texto ahora reintentan el toque hasta que aparece el teclado.
+- El CI ya no cancela ejecuciones en `main` y permite elegir runner (`macos-26` / `macos-26-intel`) al lanzarlo a mano, porque los runners arm64 de GitHub tuvieron falta de capacidad.
+- Nota: las cifras se leen del estado de los jobs; el listado completo está en los artefactos `app-*-logs`.
 
 ### No verificado (pendiente)
 - **Ejecutar** las pruebas: en este equipo Defender (política administrada, evento 1121) bloquea ejecutar cualquier `.exe` nuevo, así que `swift test` no puede correr. Se ejecutarán en un Mac o con el CI incluido.
