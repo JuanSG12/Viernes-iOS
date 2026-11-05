@@ -8,7 +8,7 @@ struct PrivacyView: View {
     var body: some View {
         List {
             Section {
-                Text("Todo se guarda cifrado en este iPhone (AES-256, clave en el Llavero que no sale del dispositivo). Viernes no tiene servidor propio, cuentas ni analítica. Lo único que sale del dispositivo es lo que tú pidas explícitamente: descargar un modelo, abrir un enlace, o enviar una pregunta a Claude.")
+                Text("Todo se guarda cifrado en este iPhone (AES-256, clave en el Llavero que no sale del dispositivo). Viernes no tiene servidor propio, cuentas ni analítica. Lo único que sale del dispositivo es lo que tú pidas o actives explícitamente: descargar un modelo, abrir un enlace, enviar una pregunta a Claude, consultar el clima de una ciudad (solo su nombre, a Open-Meteo) o usar el cerebro en la nube (opcional: tus mensajes van al proveedor que elijas).")
                     .font(.footnote).foregroundStyle(Theme.textSecondary)
             }.listRowBackground(Color.clear)
 

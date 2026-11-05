@@ -22,7 +22,36 @@ final class DeviceToolExecutor: ToolExecutor {
         case "run_shortcut": return await runShortcut(name: call.args["name"] ?? "", input: call.args["input"])
         case "device_info": return deviceInfo(what: (call.args["what"] ?? "all").lowercased())
         case "ask_claude": return await claude.ask(call.args["prompt"] ?? "")
+        case "get_weather": return await weather(city: call.args["city"] ?? "")
         default: return .failure("Herramienta no implementada: \(call.name).")
+        }
+    }
+
+    // MARK: Clima (Open-Meteo, sin clave)
+
+    private static let weatherSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 15
+        return URLSession(configuration: configuration)
+    }()
+
+    private func weather(city: String) async -> ToolOutcome {
+        guard let geocodingURL = WeatherService.geocodingURL(city: city) else { return .failure("Nombre de ciudad no válido.") }
+        do {
+            let (geoData, geoResponse) = try await Self.weatherSession.data(from: geocodingURL)
+            guard (geoResponse as? HTTPURLResponse)?.statusCode == 200 else { return .failure("El servicio de clima no respondió.") }
+            guard let place = WeatherService.parsePlace(geoData) else { return .failure("No encontré una ciudad llamada «\(city)».") }
+            guard let forecastURL = WeatherService.forecastURL(latitude: place.latitude, longitude: place.longitude) else {
+                return .failure("No pude construir la consulta del clima.")
+            }
+            let (data, response) = try await Self.weatherSession.data(from: forecastURL)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return .failure("El servicio de clima no respondió.") }
+            guard let text = WeatherService.summary(place: place, forecast: data) else { return .failure("No pude interpretar el pronóstico.") }
+            return .success(text)
+        } catch let error as URLError where [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed].contains(error.code) {
+            return .failure("Sin conexión a internet: no puedo consultar el clima.")
+        } catch {
+            return .failure("No pude consultar el clima: \(error.localizedDescription)")
         }
     }
 

@@ -35,7 +35,8 @@ public enum ClaudeMode: String, Codable, CaseIterable, Sendable {
 public struct ClaudeBridgeConfig: Codable, Equatable, Sendable {
     public var mode: ClaudeMode
     public var shortcutName: String
-    public init(mode: ClaudeMode = .disabled, shortcutName: String = "Preguntar a Claude") {
+    /// Por defecto «abrir la app de Claude»: no exige crear ningún Atajo y cada envío pide confirmación.
+    public init(mode: ClaudeMode = .openApp, shortcutName: String = "Preguntar a Claude") {
         self.mode = mode
         self.shortcutName = shortcutName
     }

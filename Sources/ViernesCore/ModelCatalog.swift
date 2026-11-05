@@ -5,6 +5,9 @@ public enum ModelBackend: Equatable, Sendable {
     case appleFoundation
     /// Modelo cuantizado de Hugging Face ejecutado con MLX Swift.
     case mlx(repo: String)
+    /// Modelo en la nube vía API compatible con OpenAI (Groq, Gemini…) con una clave gratuita del usuario.
+    /// El texto de la conversación SALE del teléfono hacia el proveedor elegido.
+    case cloud
 }
 
 public struct ModelDescriptor: Identifiable, Equatable, Sendable {
@@ -23,6 +26,11 @@ public struct ModelDescriptor: Identifiable, Equatable, Sendable {
     public let notes: String
 
     public var isSystemModel: Bool { backend == .appleFoundation }
+    public var isCloud: Bool { backend == .cloud }
+    /// El texto de la conversación sale del dispositivo hacia un servidor.
+    public var sendsTextOffDevice: Bool { isCloud }
+    /// Pesos descargados y cargados en la memoria del iPhone (MLX).
+    public var usesLocalWeights: Bool { if case .mlx = backend { return true }; return false }
     public var requiresDownload: Bool { approxDownloadMB > 0 }
 
     public init(id: String, displayName: String, backend: ModelBackend, approxDownloadMB: Int,
@@ -83,7 +91,20 @@ public enum ModelCatalog {
         )
     ]
 
-    public static func descriptor(id: String) -> ModelDescriptor? { all.first { $0.id == id } }
+    public static let cloudID = "cloud.openai-compatible"
+
+    /// El cerebro en la nube NO está en `all` (no se descarga ni se compara por RAM); se elige en su propia pantalla.
+    public static let cloudDescriptor = ModelDescriptor(
+        id: cloudID, displayName: "IA en la nube (clave gratuita)",
+        backend: .cloud, approxDownloadMB: 0, minDeviceRAMGB: 0,
+        license: "Términos del proveedor elegido", spanishQuality: 5,
+        notes: "Modelo grande en un servidor (Groq o Gemini). Conversa como una IA de verdad, pero tus mensajes salen del iPhone."
+    )
+
+    public static func descriptor(id: String) -> ModelDescriptor? {
+        if id == cloudID { return cloudDescriptor }
+        return all.first { $0.id == id }
+    }
 }
 
 /// Heurística de idoneidad por RAM. Documentada en LOCAL_MODELS.md; hay que validarla en dispositivo.

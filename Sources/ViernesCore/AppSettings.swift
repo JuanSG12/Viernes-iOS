@@ -50,6 +50,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var reducedEffects: Bool
     public var hapticsEnabled: Bool
     public var onboardingCompleted: Bool
+    /// Cerebro en la nube. Opcional a propósito: los ajustes guardados por versiones anteriores no lo tienen y deben seguir leyéndose.
+    public var cloud: CloudBrainSettings?
 
     public static let `default` = AppSettings(
         selectedModelID: nil, claude: ClaudeBridgeConfig(), voice: .default, memory: .default,
@@ -61,7 +63,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(selectedModelID: String?, claude: ClaudeBridgeConfig, voice: VoiceSettings, memory: MemoryPolicy,
                 transcriptRetention: TranscriptRetention, wakeWordEnabled: Bool, continuousConversation: Bool,
                 recognitionLocale: String, allowServerRecognition: Bool, requireBiometricsForMemory: Bool,
-                reducedEffects: Bool, hapticsEnabled: Bool, onboardingCompleted: Bool) {
+                reducedEffects: Bool, hapticsEnabled: Bool, onboardingCompleted: Bool, cloud: CloudBrainSettings? = nil) {
+        self.cloud = cloud
         self.allowServerRecognition = allowServerRecognition
         self.selectedModelID = selectedModelID
         self.claude = claude
@@ -81,6 +84,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         var copy = self
         copy.voice = voice.sanitized()
         if let id = selectedModelID, ModelCatalog.descriptor(id: id) == nil { copy.selectedModelID = nil }
+        copy.cloud = cloud?.sanitized()
         if claude.shortcutName.trimmingCharacters(in: .whitespaces).isEmpty { copy.claude.shortcutName = ClaudeBridgeConfig().shortcutName }
         return copy
     }

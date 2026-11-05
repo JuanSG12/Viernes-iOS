@@ -162,7 +162,7 @@ final class AppModel: ObservableObject {
         activeModel = descriptor
         if settings.selectedModelID != descriptor.id { settings.selectedModelID = descriptor.id }
 
-        if let real = EngineProvider.makeEngine(for: descriptor) {
+        if let real = EngineProvider.makeEngine(for: descriptor, cloud: settings.cloudBrain) {
             engine = real
         } else {
             var reason = "Este modelo no está disponible en esta compilación."
@@ -211,8 +211,14 @@ final class AppModel: ObservableObject {
     func unloadActiveModel() {
         Task {
             await engine.unload()
-            if !activeModel.isSystemModel { engineStatus = .notLoaded }
+            if activeModel.usesLocalWeights { engineStatus = .notLoaded }
         }
+    }
+
+    /// Reconstruye el motor en la nube tras guardar/borrar la clave o cambiar de proveedor o modelo.
+    func refreshCloudEngine() {
+        guard activeModel.isCloud else { return }
+        Task { await activateModel(id: ModelCatalog.cloudID) }
     }
 
     func deleteDownload(of model: ModelDescriptor) {
@@ -231,7 +237,7 @@ final class AppModel: ObservableObject {
     }
 
     private func handleMemoryWarning() {
-        guard !activeModel.isSystemModel, engineStatus.isReady else { return }
+        guard activeModel.usesLocalWeights, engineStatus.isReady else { return }
         cancelGeneration()
         Task { await engine.unload() }
         engineStatus = .notLoaded
@@ -241,7 +247,7 @@ final class AppModel: ObservableObject {
     private func pushConversationConfig() async {
         await conversation.updateConfig(ConversationConfig(
             memoryPolicy: settings.memory, claudeMode: settings.claude.mode, spokenOutput: settings.voice.speakResponses,
-            historyCharBudget: activeModel.isSystemModel ? 4_500 : 6_000
+            historyCharBudget: activeModel.isCloud ? 14_000 : (activeModel.isSystemModel ? 4_500 : 6_000)
         ))
     }
 
@@ -251,6 +257,7 @@ final class AppModel: ObservableObject {
         settingsStore.save(settings)
         if settings.voice != old.voice { speaker.apply(settings.voice) }
         if settings.claude != old.claude { claude.config = settings.claude }
+        if settings.cloudBrain != old.cloudBrain { refreshCloudEngine() }
         if settings.recognitionLocale != old.recognitionLocale {
             voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)
         }
@@ -620,6 +627,7 @@ final class AppModel: ObservableObject {
             try? await memoryStore.deleteAll()
             try? await conversations.deleteAll()
             try? Vault().destroyKey()
+            CloudKeyStore.deleteAll()
             settingsStore.reset()
             messages = []
             settings = .default

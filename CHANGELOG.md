@@ -2,6 +2,27 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.2.0] — 2026-11-05 — Primeras pruebas en iPhone 14 Pro Max (sin verificar aún en dispositivo)
+
+### Por qué
+Instalada por Sideloadly con un Apple ID gratuito, la primera prueba real mostró el límite del modelo local: Qwen3 1.7B en un iPhone con 6 GB de RAM y sin Apple Intelligence es lento, no conversa como una IA y no sabe nada en tiempo real. No se arregla con código; se ofrece otro cerebro, opcional.
+
+### Añadido
+- **Cerebro en la nube opcional** (`CloudEngine`, `CloudBrain.swift`): API de chat compatible con OpenAI con streaming, presets Groq y Google Gemini, solo HTTPS. La clave es del usuario, gratuita, y vive solo en el Llavero. Pantalla «Cerebro en la nube» con «Probar conexión» (lista los modelos reales de la clave, porque nombres y límites gratuitos cambian). **El texto de la conversación sale del teléfono** cuando está activo: documentado en SECURITY.md y en la pantalla.
+- **Herramienta `get_weather`** (Open-Meteo, sin clave): respuesta redactada para voz, sin símbolos.
+- La personalidad sabe si su cerebro es la nube (ya no dice «soy un modelo pequeño sin internet» ni se limita a ser un asistente de comandos).
+
+### Cambiado
+- Claude: el modo por defecto pasa de «desactivado» a «abrir la app de Claude». Con el modo desactivado, la herramienta `ask_claude` ni siquiera se ofrecía al modelo, por eso «pregúntale a Claude» no hacía nada. Quien ya tenía el ajuste guardado debe cambiarlo en Ajustes › Claude. Si está desactivado, Viernes lo dice.
+- Ajustes guardados antes de esta versión siguen leyéndose (el campo nuevo es opcional; hay prueba).
+
+### Pruebas
+- 15 pruebas nuevas del núcleo (flujo SSE, cuerpo de petición, errores sin fugas de clave, presets solo HTTPS, ajustes antiguos, formato de clave, clima, validación de `get_weather`). Chequeo de tipos y comprobaciones estáticas pasan en Windows; **el CI de macOS aún no las ha ejecutado** y nada de esto se ha probado en el iPhone.
+
+### No verificado
+- Funcionamiento real con Groq/Gemini (límites del plan gratuito, nombres de modelo vigentes, latencia), voz con respuestas largas de la nube, y que «Abrir Claude» precargue la pregunta (el enlace `claude.ai/new?q=` puede abrirse en Safari).
+- La lentitud del modelo local no se midió: no hay medición de tokens/s en dispositivo.
+
 ## [0.1.0] — 2026-11-04 — Primera versión (código completo, SIN compilar ni probar en iPhone)
 
 ### Añadido

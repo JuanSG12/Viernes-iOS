@@ -144,6 +144,11 @@ public enum ToolValidator {
             if let what = args["what"], !["battery", "storage", "time", "device", "all"].contains(what.lowercased()) {
                 throw fail("«what» debe ser battery, storage, time, device o all.")
             }
+        case "get_weather":
+            let city = args["city"]!
+            guard city.count <= 80, !city.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                throw fail("nombre de ciudad no válido.")
+            }
         case "ask_claude":
             let scan = SensitiveDataRedactor.scan(args["prompt"]!)
             guard !scan.isSensitive else {

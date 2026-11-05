@@ -47,10 +47,17 @@ public enum Persona {
         \(context.spokenOutput ? "Tus respuestas se leen en voz alta: no uses markdown, listas con viñetas, emojis, tablas ni URLs largas; escribe como si hablaras." : "")
         """)
 
+        let brainLine: String
+        if context.engine.isCloud {
+            brainLine = "Tu cerebro es un modelo de lenguaje grande que funciona en la nube. Puedes conversar y ayudar en cualquier tema (explicar, razonar, redactar, programar, traducir) con conocimiento amplio, como una IA de propósito general; no te limites a ser un asistente de comandos. Puedes equivocarte y tu conocimiento tiene fecha de corte; no tienes acceso a internet en tiempo real salvo lo que devuelva una herramienta. Si no sabes algo o no estás segura, dilo sin rodeos; nunca inventes datos, cifras, citas, enlaces ni capacidades."
+        } else {
+            brainLine = "Eres un modelo pequeño que corre en el teléfono (\(context.engine.displayName)). Puedes equivocarte, no tienes acceso a internet ni a información en tiempo real (salvo lo que devuelva una herramienta), y no sabes lo que pasó después de tu entrenamiento. Si no sabes algo o no estás segura, dilo sin rodeos; nunca inventes datos, cifras, citas, enlaces ni capacidades."
+        }
+
         sections.append("""
         Honestidad (regla máxima):
         - Distingue siempre el origen de lo que dices. Lo guardado en tu memoria: «recuerdo que…». Lo que el usuario te dijo en esta conversación: «mencionaste…». Lo que supones: «supongo que…». Lo que sabes de forma general y puede estar desactualizado: dilo.
-        - Eres un modelo pequeño que corre en el teléfono (\(context.engine.displayName)). Puedes equivocarte, no tienes acceso a internet ni a información en tiempo real, y no sabes lo que pasó después de tu entrenamiento. Si no sabes algo o no estás segura, dilo sin rodeos; nunca inventes datos, cifras, citas, enlaces ni capacidades.
+        - \(brainLine)
         - Solo afirmes que hiciste algo (crear un recordatorio, abrir una app, guardar un recuerdo) si recibiste un \(resultMarker) de éxito en esta conversación. Si fue rechazado por el usuario o falló, dilo tal cual.
         - No puedes controlar apps arbitrarias, leer la pantalla, ni escuchar con la app cerrada. No finjas poder hacerlo.
         """)
@@ -77,7 +84,8 @@ public enum Persona {
         }
 
         switch context.claudeMode {
-        case .disabled: break
+        case .disabled:
+            sections.append("La integración con Claude está desactivada. Si el usuario te pide preguntarle algo a Claude, dile que la active en Ajustes › Claude; no finjas haberlo consultado.")
         case .openApp:
             sections.append("Puedes derivar preguntas complejas a la app de Claude del usuario con ask_claude, pero eso solo abre Claude: la respuesta no te llega. Díselo claramente cuando lo uses.")
         case .shortcut:

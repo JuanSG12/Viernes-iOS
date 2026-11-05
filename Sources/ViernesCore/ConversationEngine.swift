@@ -323,6 +323,7 @@ public actor ConversationEngine {
         case "forget_memory", "search_memory": return a["query"] ?? ""
         case "device_info": return "Consultar \(a["what"] ?? "all")"
         case "list_reminders": return "Listar recordatorios"
+        case "get_weather": return "Clima en \(a["city"] ?? "")"
         default: return call.name
         }
     }

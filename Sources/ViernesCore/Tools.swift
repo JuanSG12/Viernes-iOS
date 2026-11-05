@@ -117,6 +117,11 @@ public enum ToolCatalog {
             parameters: [ToolParameter("what", "battery, storage, time, device o all", required: false)],
             risk: .safe),
         ToolDefinition(
+            name: "get_weather",
+            summary: "Consulta el clima actual y el pronóstico de hoy y mañana de una ciudad (usa internet; solo se envía el nombre de la ciudad).",
+            parameters: [ToolParameter("city", "Ciudad, p. ej. Bogotá o Medellín, Colombia")],
+            risk: .safe),
+        ToolDefinition(
             name: "ask_claude",
             summary: "Envía una pregunta a la app de Claude del usuario (sale de Viernes; la respuesta no vuelve aquí salvo que exista un Atajo configurado).",
             parameters: [ToolParameter("prompt", "Pregunta completa para Claude")],

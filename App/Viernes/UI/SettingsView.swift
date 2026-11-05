@@ -11,6 +11,9 @@ struct SettingsView: View {
                 NavigationLink { ModelPickerView() } label: {
                     row(icon: "cpu", title: "Modelo local", detail: model.activeModel.displayName, status: engineStatusText)
                 }.accessibilityIdentifier("settings-model")
+                NavigationLink { CloudBrainView() } label: {
+                    row(icon: "cloud", title: "Cerebro en la nube", detail: model.activeModel.isCloud ? "ACTIVO · una IA grande en línea" : "Opcional · clave gratuita, más inteligente", status: nil)
+                }.accessibilityIdentifier("settings-cloud")
                 row(icon: model.isOnline ? "wifi" : "wifi.slash", title: "Conexión",
                     detail: model.isOnline ? "En línea. El modelo local funciona igual sin internet." : "Sin conexión. Todo sigue funcionando en modo local.", status: nil)
                 NavigationLink { ClaudeSettingsView() } label: {

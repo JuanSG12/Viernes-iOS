@@ -4,7 +4,7 @@ Modelo de amenazas, controles implementados y límites. Nada de esto ha sido aud
 
 ## Principios
 
-1. **Local primero**: no hay servidor de Viernes, cuentas, telemetría ni analítica.
+1. **Local primero, nube solo si la activas**: no hay servidor de Viernes, cuentas, telemetría ni analítica. Por defecto todo corre en el teléfono. El **cerebro en la nube** (Groq / Gemini con TU clave gratuita) es opcional y, si lo activas, el texto de la conversación sale hacia ese proveedor (ver «Límites»).
 2. **El audio no sale del teléfono por defecto** y nunca se guarda.
 3. **El modelo no es de confianza**: todo lo que produce (llamadas de herramientas, URLs, fechas) se valida; lo sensible requiere confirmación humana.
 4. **Lo externo no es de confianza**: enlaces `viernes://`, resultados de Atajos y texto de Claude son datos, no órdenes.
@@ -27,6 +27,7 @@ Modelo de amenazas, controles implementados y límites. Nada de esto ha sido aud
 | Audio a servidores | `requiresOnDeviceRecognition = true` salvo opt-in «Permitir reconocimiento de Apple por internet» | `SpeechListener`, `ListeningSettingsView` |
 | Calendario/recordatorios | Calendario: acceso **solo de escritura**; recordatorios: acceso completo solicitado al primer uso con explicación | `DeviceToolExecutor`, Info.plist |
 | Pantalla de memoria | Face ID/código opcional (`LocalAuthentication`) | `MemoryView`, `Permissions` |
+| Clave del proveedor en la nube | Solo en el Llavero (`AfterFirstUnlockThisDeviceOnly`), nunca en UserDefaults/código/registros; solo se envía por HTTPS a presets cerrados (no hay URL libre); formato validado; «Borrar todos los datos» la elimina; los mensajes de error no la incluyen | `CloudKeyStore`, `CloudBrain`, `CloudEngine` |
 | Claves de Anthropic | No existen; `static-check.ps1` y una prueba unitaria fallan si aparece `api.anthropic.com`, `x-api-key` o algo con forma `sk-ant-…` | `scripts/`, `SecurityTests` |
 
 ## Límites y riesgos residuales (honestos)
@@ -36,7 +37,9 @@ Modelo de amenazas, controles implementados y límites. Nada de esto ha sido aud
 - **Descarga de modelos**: se hace con el cliente de Hugging Face de `mlx-swift-lm` (HTTPS). No se verifica una firma/hash propio del modelo más allá de lo que haga ese cliente. Los repos son de `mlx-community`; la cadena de suministro es la de terceros (Hugging Face, `mlx-swift-lm`, `swift-transformers`).
 - **Macros de Swift**: `mlx-swift-lm` usa macros (swift-syntax); Xcode pedirá confiar en ellas. Revisa qué paquetes aceptas.
 - **Prompt injection**: un modelo pequeño puede ser manipulado por texto adversarial (p. ej. pegado por el usuario) para *pedir* una herramienta. Las barreras (validación + confirmación) limitan el daño a lo que tú confirmes; las acciones «seguras» (abrir una app de la lista, consultar batería, listar recordatorios) no piden confirmación.
-- **Recordatorios completos**: `list_reminders` lee tus recordatorios pendientes y los entrega al modelo local (no sale del teléfono), pero si luego usas `ask_claude` con ese contenido, saldría. Revisa siempre la confirmación.
+- **Recordatorios completos**: `list_reminders` lee tus recordatorios pendientes y los entrega al modelo activo. Con un modelo local no salen del teléfono; **con el cerebro en la nube sí salen** (igual que el resto de la conversación), y también si luego usas `ask_claude`. Revisa siempre la confirmación.
+- **Cerebro en la nube (opcional)**: con él activo salen del teléfono tu mensaje, el historial reciente (hasta ≈14 000 caracteres), los recuerdos relevantes al mensaje (hasta 5) y los resultados de herramientas. No salen la memoria completa, la clave de cifrado ni el audio. El proveedor puede registrar esos datos; los planes gratuitos suelen permitirle usarlos para mejorar sus productos (revisa sus términos). El filtro de datos sensibles protege lo que se **guarda** y lo que va a Claude, pero **no filtra lo que dictas al cerebro en la nube**: no le digas contraseñas ni tarjetas.
+- **Clima**: `get_weather` envía a Open-Meteo (HTTPS, sin clave ni cuenta) el nombre de la ciudad y luego sus coordenadas. Es una herramienta «segura» (sin confirmación) porque no revela nada más que esa ciudad.
 - **Dispositivo desbloqueado**: con el teléfono desbloqueado y la app abierta, quien lo use puede ver el historial. Face ID solo protege la pantalla de Memoria, no el historial.
 - **Sin auditoría ni pruebas de penetración**. Sin protección anti-jailbreak.
 - **Cumplimiento de exportación (cifrado)**: la app usa AES-GCM de CryptoKit para datos propios; revisa la declaración de cifrado de App Store Connect si distribuyes la app (`ITSAppUsesNonExemptEncryption`). No se ha declarado.

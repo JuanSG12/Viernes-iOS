@@ -10,15 +10,17 @@ Viernes es una asistente de voz **nativa de iOS** (Swift + SwiftUI) con cerebro 
 | Es | No es |
 |---|---|
 | App nativa de iPhone (iOS 18+; Apple Intelligence con iOS 26+) | PWA, servidor Windows ni nada que dependa de un PC encendido |
-| IA local: modelo del sistema (Apple) o modelos MLX cuantizados | Un cliente de la API de Anthropic (no hay claves ni endpoints) |
-| Memoria y historial cifrados (AES-256-GCM, clave en Keychain) | Un servicio en la nube con cuentas |
+| Cerebro a elegir: modelo del sistema (Apple), modelos MLX locales **o una IA grande en la nube con tu clave gratuita (opcional)** | Un cliente de la API de Anthropic (no hay claves ni endpoints de Anthropic) |
+| Memoria y historial cifrados (AES-256-GCM, clave en Keychain) | Un servicio propio con cuentas (no hay servidor de Viernes) |
 | Voz: dictado y síntesis del sistema, en el dispositivo | Escucha permanente con la app cerrada (iOS no lo permite) |
 | Siri/Atajos vía App Intents | Un reemplazo de Siri |
 
 ## Capacidades
 
 - **Conversación por voz o texto**, respuestas habladas frase a frase mientras se generan (menor latencia).
-- **Cerebro intercambiable** ([LOCAL_MODELS.md](LOCAL_MODELS.md)): Apple Intelligence (sin descarga) o Qwen3 / Gemma 3 / Llama 3.2 en MLX. Si el modelo es limitado o no está disponible, lo dice; nunca inventa respuestas.
+- **Cerebro en la nube (opcional)**: los modelos que caben en un iPhone (sobre todo con 6 GB de RAM y sin Apple Intelligence) no conversan como una IA de verdad. Con una clave gratuita de Groq o Google Gemini, Viernes usa un modelo grande en línea; el texto de la conversación sale del teléfono hacia ese proveedor. Ver [SECURITY.md](SECURITY.md). Sin clave, todo sigue siendo local.
+- **Clima** con Open-Meteo (sin clave): herramienta `get_weather`.
+- **Cerebro local intercambiable** ([LOCAL_MODELS.md](LOCAL_MODELS.md)): Apple Intelligence (sin descarga) o Qwen3 / Gemma 3 / Llama 3.2 en MLX. Si el modelo es limitado o no está disponible, lo dice; nunca inventa respuestas.
 - **Personalidad** consistente (español colombiano neutro, ingeniosa con sarcasmo sutil) y un prompt que separa *recuerdo / lo dicho en la conversación / suposición / acción realizada*.
 - **Memoria**: guardar, buscar, editar, fijar y borrar recuerdos; política configurable por tipo; sugerencias solo con tu aprobación; datos sensibles rechazados siempre.
 - **Herramientas de iOS** (todas validadas; las sensibles piden confirmación): abrir apps de una lista blanca, abrir enlaces https, crear/listar/completar recordatorios, crear eventos (acceso solo de escritura), ejecutar Atajos, consultar batería/almacenamiento/hora, memoria local.
