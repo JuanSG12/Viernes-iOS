@@ -10,10 +10,14 @@ public struct VoiceSettings: Codable, Equatable, Sendable {
     /// Multiplicador de las pausas entre frases (0 = sin pausas).
     public var pauseScale: Double
     public var speakResponses: Bool
+    /// Voz neuronal en la nube (opcional; ausente en ajustes guardados por versiones anteriores).
+    public var elevenLabs: ElevenLabsSettings?
 
     public static let `default` = VoiceSettings(voiceIdentifier: nil, rate: 0.5, volume: 1.0, pitch: 0.95, pauseScale: 1.0, speakResponses: true)
 
-    public init(voiceIdentifier: String?, rate: Float, volume: Float, pitch: Float, pauseScale: Double, speakResponses: Bool) {
+    public init(voiceIdentifier: String?, rate: Float, volume: Float, pitch: Float, pauseScale: Double, speakResponses: Bool,
+                elevenLabs: ElevenLabsSettings? = nil) {
+        self.elevenLabs = elevenLabs
         self.voiceIdentifier = voiceIdentifier
         self.rate = rate
         self.volume = volume
@@ -28,6 +32,7 @@ public struct VoiceSettings: Codable, Equatable, Sendable {
         copy.volume = min(max(volume, 0), 1)
         copy.pitch = min(max(pitch, 0.5), 2)
         copy.pauseScale = min(max(pauseScale, 0), 3)
+        copy.elevenLabs = elevenLabs?.sanitized()
         return copy
     }
 }

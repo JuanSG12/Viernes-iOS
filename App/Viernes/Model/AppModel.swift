@@ -149,6 +149,7 @@ final class AppModel: ObservableObject {
         speaker.onStart = { [weak self] in if self?.coreState != .error { self?.coreState = .speaking } }
         speaker.onWord = { [weak self] in self?.speakPulse = Date() }
         speaker.onFinish = { [weak self] in self?.speechFinished() }
+        speaker.onCloudError = { [weak self] message in self?.showBanner(message) }
         claude.onResult = { [weak self] prompt, answer in self?.claudeAnswered(prompt: prompt, answer: answer) }
         claude.onCancelled = { [weak self] in self?.showBanner("El Atajo de Claude no devolvió texto. Revisa la respuesta en la app de Claude.") }
     }
@@ -729,5 +730,14 @@ final class AppModel: ObservableObject {
 
     func previewVoice(identifier: String?) {
         speaker.preview(identifier: identifier, settings: settings.voice)
+    }
+
+    /// Muestra con la voz neuronal elegida, aunque el interruptor aún esté apagado (para probarla antes de activarla).
+    func previewCloudVoice() {
+        var voice = settings.voice
+        var cloud = voice.elevenLabs ?? .default
+        cloud.enabled = true
+        voice.elevenLabs = cloud
+        speaker.preview(identifier: voice.voiceIdentifier, settings: voice)
     }
 }

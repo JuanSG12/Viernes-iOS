@@ -6,6 +6,20 @@ struct VoicePickerView: View {
 
     var body: some View {
         List {
+            Section {
+                NavigationLink { ElevenLabsVoiceView() } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "waveform.badge.mic").foregroundStyle(Theme.cyan).frame(width: 26)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Voz neuronal (ElevenLabs)").foregroundStyle(Theme.textPrimary)
+                            Text(model.settings.voice.elevenLabs?.isUsable == true ? "ACTIVA · más humana, en la nube" : "Opcional · clave gratuita, suena mucho más humana")
+                                .font(.caption).foregroundStyle(Theme.textSecondary)
+                        }
+                    }
+                }.accessibilityIdentifier("voice-cloud")
+            }
+            .listRowBackground(Theme.deep.opacity(0.5))
+
             Section("Ajustes de habla") {
                 Toggle("Hablar las respuestas", isOn: $model.settings.voice.speakResponses)
                 slider("Velocidad", value: Binding(get: { Double(model.settings.voice.rate) }, set: { model.settings.voice.rate = Float($0) }), range: 0.3...0.65, format: "%.2f")

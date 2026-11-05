@@ -23,7 +23,7 @@ Nada de esto se ha probado todavía en un iPhone (ver [INSTALL.md](INSTALL.md#pr
 
 ## Síntesis de voz (salida)
 
-**Implementado**: `AVSpeechSynthesizer` — voces del sistema, 100 % locales.
+**Implementado**: `AVSpeechSynthesizer` — voces del sistema, 100 % locales (por defecto). Opcionalmente, voz neuronal de ElevenLabs en la nube (ver más abajo).
 
 - **Selección automática** (`VoiceRanker`): solo español; puntaje por variante (es-CO ≫ es-MX/es-US/es-419 > otras latinas > es-ES), femenina, y calidad **Premium > Mejorada > Estándar**. Se penalizan las voces *eloquence* y de novedad (suenan robóticas). Si descargas una voz Premium, será la elegida.
 - **Ajustes**: voz, velocidad (0,30–0,65), volumen, tono (0,7–1,3), escala de pausas (0–2,5×), hablar sí/no.
@@ -31,8 +31,17 @@ Nada de esto se ha probado todavía en un iPhone (ver [INSTALL.md](INSTALL.md#pr
 - **Interrupción y gestión de audio**: `stop()` inmediato; sesión `playAndRecord` con altavoz por defecto y Bluetooth permitido; al salir de la app se detiene todo.
 - **Voz «elegante, madura, natural»**: depende de **las voces instaladas** en el iPhone. Las Premium de Apple son notablemente mejores que las estándar; es la mayor palanca de calidad sin cambiar código. No se imita la voz de ningún personaje.
 
+**Voz neuronal en la nube (opcional, ElevenLabs)** — añadida en 0.2.0, **sin probar en dispositivo**.
+- Ajustes › Voz y habla › «Voz neuronal»: clave del usuario (Llavero), lista de sus voces (`GET /v1/voices`), elección con muestra, e interruptor. Apagada por defecto.
+- Cada frase (ya limpiada por `SpeechText`) se envía a ElevenLabs por HTTPS (`POST /v1/text-to-speech/{voice_id}`, mp3) y se reproduce con `AVAudioPlayer`. Se piden como máximo 2 frases a la vez porque el plan gratuito limita la concurrencia.
+- **Respaldo**: si ElevenLabs falla (sin conexión, cuota, plan, clave), esa frase se dice con la voz del sistema, se avisa una vez y, si el error es de configuración, la nube se suspende hasta cambiar los ajustes.
+- **Lo que sale del teléfono**: solo el texto que Viernes dice. No se envía audio del micrófono.
+- **Límites que no pude verificar**: las fuentes contradicen qué voces y qué acceso por API incluye el plan gratuito, y cuántos créditos cuesta cada carácter. La app lo comprueba en vez de suponerlo: si una voz exige plan de pago, el error lo dice y se elige otra. La cuota mensual es corta y el plan gratuito no está pensado para uso comercial.
+- **Español**: el acento depende de la voz y del modelo (`eleven_flash_v2_5` por defecto); hay que probar varias voces.
+- No se imita la voz de ningún personaje ni actor: se usan voces genéricas de la lista de la cuenta.
+
 **Evaluado y no incluido aún**
-- **Kokoro (82 M parámetros, Apache 2.0)** vía MLX/Core ML: voz neuronal local mucho más natural en inglés; para español hay voces pero con menos calidad y no he verificado una integración Swift estable. Plan: probarlo cuando exista un empaquetado Core ML/MLX Swift fiable y medir latencia/batería.
+- **Kokoro (82 M parámetros, Apache 2.0)** local: investigado para 0.2.0 y **descartado por ahora**. Solo trae 3 voces en español (una femenina, `ef_dora`) y su documentación advierte soporte «escaso» fuera del inglés; `kokoro-ios` (MIT) solo incluye el conversor de texto a fonemas para inglés; el único para español es espeak-ng, cuyo paquete Swift es GPLv3 (incompatible con una app sin licencia GPL); y no encontré Kokoro en `mlx-audio-swift`. Habría que escribir un conversor propio de español a fonemas y no se puede oír el resultado desde este entorno.
 - **Personal Voice** de Apple: requiere que el usuario grabe su propia voz y no hay API de TTS pública para apps de terceros en todos los casos; descartado.
 
 ## Activación por la palabra «Viernes»

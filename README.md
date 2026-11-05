@@ -19,6 +19,7 @@ Viernes es una asistente de voz **nativa de iOS** (Swift + SwiftUI) con cerebro 
 
 - **Conversación por voz o texto**, respuestas habladas frase a frase mientras se generan (menor latencia).
 - **Cerebro en la nube (opcional)**: los modelos que caben en un iPhone (sobre todo con 6 GB de RAM y sin Apple Intelligence) no conversan como una IA de verdad. Con una clave gratuita de Groq o Google Gemini, Viernes usa un modelo grande en línea; el texto de la conversación sale del teléfono hacia ese proveedor. Ver [SECURITY.md](SECURITY.md). Sin clave, todo sigue siendo local.
+- **Voz neuronal (opcional)**: con una clave gratuita de ElevenLabs, Viernes habla con una voz mucho más humana que las del iPhone; el texto que dice sale del teléfono. Sin ella, usa las voces del sistema (recomendado: descargar una **Premium** en Ajustes de iOS).
 - **Clima** con Open-Meteo (sin clave): herramienta `get_weather`.
 - **Cerebro local intercambiable** ([LOCAL_MODELS.md](LOCAL_MODELS.md)): Apple Intelligence (sin descarga) o Qwen3 / Gemma 3 / Llama 3.2 en MLX. Si el modelo es limitado o no está disponible, lo dice; nunca inventa respuestas.
 - **Personalidad** consistente (español colombiano neutro, ingeniosa con sarcasmo sutil) y un prompt que separa *recuerdo / lo dicho en la conversación / suposición / acción realizada*.

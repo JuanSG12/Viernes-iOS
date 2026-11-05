@@ -27,5 +27,6 @@ enum CloudKeyStore {
 
     static func deleteAll() {
         for preset in CloudProviders.all { delete(providerID: preset.id) }
+        delete(providerID: ElevenLabsProtocol.keyProviderID)
     }
 }

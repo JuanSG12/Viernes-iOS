@@ -10,6 +10,7 @@ Instalada por Sideloadly con un Apple ID gratuito, la primera prueba real mostr�
 ### Añadido
 - **Cerebro en la nube opcional** (`CloudEngine`, `CloudBrain.swift`): API de chat compatible con OpenAI con streaming, presets Groq y Google Gemini, solo HTTPS. La clave es del usuario, gratuita, y vive solo en el Llavero. Pantalla «Cerebro en la nube» con «Probar conexión» (lista los modelos reales de la clave, porque nombres y límites gratuitos cambian). **El texto de la conversación sale del teléfono** cuando está activo: documentado en SECURITY.md y en la pantalla.
 - **Herramienta `get_weather`** (Open-Meteo, sin clave): respuesta redactada para voz, sin símbolos.
+- **Voz neuronal opcional (ElevenLabs)** (`ElevenLabsVoiceView`, `CloudSpeech.swift`, cola en `SpeechSpeaker`): clave en el Llavero, lista de voces de la cuenta, muestra, interruptor, máximo 2 descargas simultáneas y **respaldo automático a la voz del sistema** si falla. Cada frase hablada sale del teléfono hacia ElevenLabs (no el audio del micrófono). Kokoro local se investigó y se descartó por ahora (ver VOICE.md). 6 pruebas nuevas del protocolo.
 - La personalidad sabe si su cerebro es la nube (ya no dice «soy un modelo pequeño sin internet» ni se limita a ser un asistente de comandos).
 
 ### Cambiado
@@ -21,6 +22,7 @@ Instalada por Sideloadly con un Apple ID gratuito, la primera prueba real mostr�
 
 ### No verificado
 - Funcionamiento real con Groq/Gemini (límites del plan gratuito, nombres de modelo vigentes, latencia), voz con respuestas largas de la nube, y que «Abrir Claude» precargue la pregunta (el enlace `claude.ai/new?q=` puede abrirse en Safari).
+- ElevenLabs: qué voces y qué acceso por API incluye hoy el plan gratuito (las fuentes se contradicen), calidad del español, latencia por frase y cuota real. La cola de reproducción (orden, interrupción, respaldo) nunca se ha ejecutado.
 - La lentitud del modelo local no se midió: no hay medición de tokens/s en dispositivo.
 
 ## [0.1.0] — 2026-11-04 — Primera versión (código completo, SIN compilar ni probar en iPhone)
