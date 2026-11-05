@@ -28,6 +28,14 @@ final class ViernesUITests: XCTestCase {
         element.typeText(text)
     }
 
+    /// Las listas son perezosas: una fila fuera de pantalla no existe para XCUITest. Se desplaza hacia abajo y, si hace falta, hacia arriba.
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
+        var attempts = 0
+        while !element.exists && attempts < 6 { app.swipeUp(); attempts += 1 }
+        attempts = 0
+        while !element.exists && attempts < 10 { app.swipeDown(); attempts += 1 }
+    }
+
     func testOnboardingExplainsThenStarts() {
         let app = launch(skipOnboarding: false)
         let start = app.buttons["onboarding-start"]
@@ -77,6 +85,7 @@ final class ViernesUITests: XCTestCase {
         ]
         for destination in destinations {
             let row = app.buttons[destination.id]
+            reveal(row, in: app)
             XCTAssertTrue(row.waitForExistence(timeout: 5), "Falta la fila \(destination.id)")
             row.tap()
             XCTAssertTrue(app.navigationBars[destination.title].waitForExistence(timeout: 5), "No abrió \(destination.title)")
@@ -134,7 +143,7 @@ final class ViernesUITests: XCTestCase {
         let erase = app.buttons["erase-all"]
         // La lista es perezosa: el botón del final no existe en pantalla hasta que se desplaza.
         var attempts = 0
-        while !erase.exists && attempts < 6 { app.swipeUp(); attempts += 1 }
+        while !erase.exists && attempts < 10 { app.swipeUp(); attempts += 1 }
         XCTAssertTrue(erase.waitForExistence(timeout: 5))
         erase.tap()
         XCTAssertTrue(app.buttons["Borrar memoria, historial y ajustes"].waitForExistence(timeout: 3))
