@@ -18,10 +18,10 @@ struct ModelPickerView: View {
 
             ForEach(ModelCatalog.all) { descriptor in
                 modelRow(descriptor)
-                    .listRowBackground(Theme.deep.opacity(model.activeModel.id == descriptor.id ? 0.9 : 0.5))
+                    .listRowBackground(Theme.carbon.opacity(model.activeModel.id == descriptor.id ? 0.9 : 0.5))
             }
         }
-        .holoList()
+        .chromeList()
         .navigationTitle("Modelo local")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Descargar modelo", isPresented: Binding(get: { confirmDownload != nil }, set: { if !$0 { confirmDownload = nil } }), titleVisibility: .visible, presenting: confirmDownload) { descriptor in
@@ -43,10 +43,10 @@ struct ModelPickerView: View {
             HStack {
                 Text(descriptor.displayName).font(.headline).foregroundStyle(Theme.textPrimary)
                 Spacer()
-                if isActive { Text("ACTIVO").font(.system(size: 10, design: .monospaced)).tracking(2).foregroundStyle(Theme.cyan) }
+                if isActive { Text("ACTIVO").font(.system(size: 10, design: .monospaced)).tracking(2).foregroundStyle(Theme.accent) }
             }
             HStack(spacing: 8) {
-                badge(fit.rawValue, tint: fit == .recommended ? Theme.cyan : fit == .possible ? Theme.amber : Theme.alert)
+                badge(fit.rawValue, tint: fit == .recommended ? Theme.accent : fit == .possible ? Theme.amber : Theme.alert)
                 badge(descriptor.requiresDownload ? "≈\(descriptor.approxDownloadMB) MB" : "Sin descarga", tint: Theme.textSecondary)
                 badge("Español \(String(repeating: "●", count: descriptor.spanishQuality))\(String(repeating: "○", count: 5 - descriptor.spanishQuality))", tint: Theme.textSecondary)
             }
@@ -55,13 +55,13 @@ struct ModelPickerView: View {
 
             HStack {
                 if !isActive {
-                    Button("Usar este") { Task { await model.activateModel(id: descriptor.id) } }.buttonStyle(HoloButtonStyle())
+                    Button("Usar este") { Task { await model.activateModel(id: descriptor.id) } }.buttonStyle(ChromeButtonStyle())
                 } else {
                     activeControls(descriptor)
                 }
                 if !descriptor.isSystemModel && !isActive {
                     Button("Eliminar descarga", role: .destructive) { model.deleteDownload(of: descriptor) }
-                        .buttonStyle(HoloButtonStyle(tint: Theme.alert))
+                        .buttonStyle(ChromeButtonStyle(tint: Theme.alert))
                 }
             }
         }
@@ -75,16 +75,16 @@ struct ModelPickerView: View {
         switch model.engineStatus {
         case .ready:
             if !descriptor.isSystemModel {
-                Button("Descargar de memoria") { model.unloadActiveModel() }.buttonStyle(HoloButtonStyle(tint: Theme.amber))
+                Button("Descargar de memoria") { model.unloadActiveModel() }.buttonStyle(ChromeButtonStyle(tint: Theme.amber))
             } else {
-                Label("Listo", systemImage: "checkmark.circle").foregroundStyle(Theme.cyan)
+                Label("Listo", systemImage: "checkmark.circle").foregroundStyle(Theme.accent)
             }
         case .notLoaded:
-            Button("Descargar y cargar") { confirmDownload = descriptor }.buttonStyle(HoloButtonStyle())
+            Button("Descargar y cargar") { confirmDownload = descriptor }.buttonStyle(ChromeButtonStyle())
                 .accessibilityIdentifier("download-model")
         case .downloading(let progress):
             VStack(alignment: .leading) {
-                ProgressView(value: progress).tint(Theme.cyan)
+                ProgressView(value: progress).tint(Theme.accent)
                 Text("Descargando \(Int(progress * 100)) %").font(.caption).foregroundStyle(Theme.textSecondary)
             }
         case .loading:
@@ -92,7 +92,7 @@ struct ModelPickerView: View {
         case .unavailable(let reason), .failed(let reason):
             VStack(alignment: .leading, spacing: 6) {
                 Label(reason, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(Theme.alert)
-                if !descriptor.isSystemModel { Button("Reintentar") { model.loadActiveModel() }.buttonStyle(HoloButtonStyle(tint: Theme.amber)) }
+                if !descriptor.isSystemModel { Button("Reintentar") { model.loadActiveModel() }.buttonStyle(ChromeButtonStyle(tint: Theme.amber)) }
             }
         }
     }

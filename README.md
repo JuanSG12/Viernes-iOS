@@ -1,6 +1,6 @@
 # Viernes — asistente personal nativa para iPhone
 
-Viernes es una asistente de voz **nativa de iOS** (Swift + SwiftUI) con cerebro de IA **local**, memoria cifrada en el dispositivo, voz en español, integración con Siri/Atajos y una interfaz holográfica. Es una identidad original: no imita a ningún personaje ni su voz.
+Viernes es una asistente de voz **nativa de iOS** (Swift + SwiftUI) con cerebro de IA **local**, memoria cifrada en el dispositivo, voz en español, integración con Siri/Atajos y una interfaz «Black Chrome / Neural Orange». Es una identidad original: no imita a ningún personaje ni su voz.
 
 > **Estado: v0.1.0 — código completo, sin compilar ni probar en iPhone.**
 > Se desarrolló en Windows, donde no existe Xcode ni el SDK de iOS. Tanto el **core** como la **app iOS** compilan en el CI de macOS, y ya se ejecutaron pruebas en simulador. **Nada se ha probado todavía en un iPhone físico.** Lee [Estado real](#estado-real) antes de asumir nada.
@@ -27,7 +27,7 @@ Viernes es una asistente de voz **nativa de iOS** (Swift + SwiftUI) con cerebro 
 - **Herramientas de iOS** (todas validadas; las sensibles piden confirmación): abrir apps de una lista blanca, abrir enlaces https, crear/listar/completar recordatorios, crear eventos (acceso solo de escritura), ejecutar Atajos, consultar batería/almacenamiento/hora, memoria local.
 - **Activación**: botón/núcleo, palabra «Viernes» **solo con la app abierta**, Siri («Habla con Viernes»), Atajos, enlaces `viernes://`.
 - **Claude por vías oficiales** ([CLAUDE_INTEGRATION.md](CLAUDE_INTEGRATION.md)): abrir la app de Claude o un Atajo tuyo con «Ask Claude». La UI nunca afirma que Claude está integrado cuando solo se abrió su app.
-- **Interfaz holográfica** (Canvas de SwiftUI, 8–30 fps según el estado, 0 fps en segundo plano): estados escucha / pensamiento / respuesta / espera / error / sin cerebro.
+- **Interfaz Black Chrome / Neural Orange** (SwiftUI nativo, sin dependencias): núcleo de anillos de cromo oscuro con luz naranja dibujado en `Canvas` (6–30 fps según el estado, 0 fps en segundo plano, respeta «Reducir movimiento»). Reacciona solo a estados reales: escucha (nivel del micrófono), pensamiento (partículas que convergen), habla (pulso por palabra), herramientas (nodos conectados) y espera. Pantalla de inicio y conversación rediseñadas, cápsula de voz con ondas, tarjetas de acciones y sistema de diseño común (`Theme.swift`).
 
 ## Estado real
 

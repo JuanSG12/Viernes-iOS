@@ -35,20 +35,20 @@ struct PermissionsView: View {
             Section {
                 ForEach(items) { item in
                     HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: item.icon).foregroundStyle(Theme.cyan).frame(width: 26)
+                        Image(systemName: item.icon).foregroundStyle(Theme.accent).frame(width: 26)
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
                                 Text(item.title).foregroundStyle(Theme.textPrimary)
                                 Spacer()
                                 Text(item.state.label).font(.caption)
-                                    .foregroundStyle(item.state.isGranted ? Theme.cyan : (item.state == .notDetermined ? Theme.textSecondary : Theme.amber))
+                                    .foregroundStyle(item.state.isGranted ? Theme.accent : (item.state == .notDetermined ? Theme.textSecondary : Theme.amber))
                             }
                             Text(item.why).font(.caption).foregroundStyle(Theme.textSecondary)
                             if item.state == .notDetermined, let request = item.request {
-                                Button("Conceder") { Task { await request(); model.permissionTick += 1 } }.buttonStyle(HoloButtonStyle())
+                                Button("Conceder") { Task { await request(); model.permissionTick += 1 } }.buttonStyle(ChromeButtonStyle())
                             } else if item.state == .denied || item.state == .restricted {
                                 Button("Abrir Ajustes de iOS") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
-                                    .buttonStyle(HoloButtonStyle(tint: Theme.amber))
+                                    .buttonStyle(ChromeButtonStyle(tint: Theme.amber))
                             }
                         }
                     }
@@ -56,15 +56,15 @@ struct PermissionsView: View {
                     .accessibilityIdentifier("permission-\(item.id)")
                 }
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("No usa") {
                 Text("Ubicación, contactos, fotos, cámara, Bluetooth ni notificaciones. Tampoco modos de ejecución en segundo plano.")
                     .font(.footnote).foregroundStyle(Theme.textSecondary)
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
         }
-        .holoList()
+        .chromeList()
         .navigationTitle("Permisos")
         .navigationBarTitleDisplayMode(.inline)
     }

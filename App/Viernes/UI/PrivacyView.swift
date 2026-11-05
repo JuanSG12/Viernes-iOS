@@ -26,7 +26,7 @@ struct PrivacyView: View {
                 Text("Nunca se guarda algo automáticamente: solo cuando dices «recuerda que…», lo añades tú, o apruebas una sugerencia. Contraseñas, tarjetas, claves y documentos de identidad se rechazan siempre.")
                     .font(.caption).foregroundStyle(Theme.textSecondary)
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Historial de conversaciones") {
                 Picker("Guardar transcripciones", selection: $model.settings.transcriptRetention) {
@@ -34,7 +34,7 @@ struct PrivacyView: View {
                 }
                 Text("Al reducir el plazo, lo más antiguo se borra de inmediato.").font(.caption).foregroundStyle(Theme.textSecondary)
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Protección") {
                 Toggle("Pedir Face ID para ver la Memoria", isOn: $model.settings.requireBiometricsForMemory)
@@ -43,7 +43,7 @@ struct PrivacyView: View {
                     Text("Este dispositivo no tiene Face ID, Touch ID ni código configurado.").font(.caption).foregroundStyle(Theme.amber)
                 }
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Audio") {
                 Label("El audio se transcribe en el dispositivo y no se guarda.", systemImage: "waveform.badge.mic")
@@ -51,15 +51,15 @@ struct PrivacyView: View {
                     .foregroundStyle(model.settings.allowServerRecognition ? Theme.amber : Theme.textPrimary)
             }
             .font(.footnote)
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Borrar") {
                 Button("Borrar todos los datos de Viernes", role: .destructive) { confirmErase = true }
                     .accessibilityIdentifier("erase-all")
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
         }
-        .holoList()
+        .chromeList()
         .navigationTitle("Privacidad")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("¿Borrar todo?", isPresented: $confirmErase, titleVisibility: .visible) {

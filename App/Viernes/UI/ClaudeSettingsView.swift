@@ -22,13 +22,13 @@ struct ClaudeSettingsView: View {
                                 Text(mode.honestDescription).font(.caption).foregroundStyle(Theme.textSecondary)
                             }
                             Spacer()
-                            if model.settings.claude.mode == mode { Image(systemName: "checkmark").foregroundStyle(Theme.cyan) }
+                            if model.settings.claude.mode == mode { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
                         }
                     }
                     .accessibilityIdentifier("claude-mode-\(mode.rawValue)")
                 }
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             if model.settings.claude.mode == .shortcut {
                 Section {
@@ -37,11 +37,11 @@ struct ClaudeSettingsView: View {
                         .accessibilityIdentifier("claude-shortcut-name")
                     Text("Crea en la app Atajos un atajo con ese nombre: acción «Recibir entrada de atajo» → acción «Ask Claude» (de la app de Claude, iOS 18+) con esa entrada → «Detener y dar resultado». Si «Ask Claude» devuelve el texto como resultado, Viernes lo mostrará. Eso no está documentado por Anthropic: compruébalo en tu iPhone.")
                         .font(.caption).foregroundStyle(Theme.textSecondary)
-                    Button("Abrir app Atajos") { UIApplication.shared.open(URL(string: "shortcuts://")!) }.buttonStyle(HoloButtonStyle())
+                    Button("Abrir app Atajos") { UIApplication.shared.open(URL(string: "shortcuts://")!) }.buttonStyle(ChromeButtonStyle())
                 } header: { Text("Atajo") } footer: {
                     Text("Usa tu suscripción desde la app de Claude y cuenta para sus límites de uso.")
                 }
-                .listRowBackground(Theme.deep.opacity(0.5))
+                .listRowBackground(Theme.carbon.opacity(0.5))
             }
 
             Section("Privacidad") {
@@ -49,9 +49,9 @@ struct ClaudeSettingsView: View {
                     .font(.caption).foregroundStyle(Theme.textSecondary)
                 if !model.isOnline { Label("Sin conexión: Claude no responderá hasta que vuelva internet.", systemImage: "wifi.slash").foregroundStyle(Theme.amber).font(.caption) }
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
         }
-        .holoList()
+        .chromeList()
         .navigationTitle("Claude")
         .navigationBarTitleDisplayMode(.inline)
     }

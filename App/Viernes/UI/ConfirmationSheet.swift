@@ -10,7 +10,7 @@ struct ConfirmationSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Theme.label("Confirmación requerida")
             Text(request.title).font(.system(size: 24, weight: .light)).foregroundStyle(Theme.textPrimary)
-            GlassPanel(tint: Theme.amber) {
+            ChromePanel(tint: Theme.amber) {
                 Text(request.detail)
                     .font(.system(size: 15, design: .rounded))
                     .foregroundStyle(Theme.textPrimary)
@@ -23,10 +23,10 @@ struct ConfirmationSheet: View {
             Spacer()
             HStack(spacing: 12) {
                 Button("Cancelar") { confirmation.resolve(false) }
-                    .buttonStyle(HoloButtonStyle(tint: Theme.amber))
+                    .buttonStyle(ChromeButtonStyle(tint: Theme.amber))
                     .accessibilityIdentifier("confirm-cancel")
                 Button("Confirmar") { confirmation.resolve(true) }
-                    .buttonStyle(HoloButtonStyle(tint: Theme.cyan))
+                    .buttonStyle(ChromeButtonStyle(tint: Theme.accent))
                     .accessibilityIdentifier("confirm-accept")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)

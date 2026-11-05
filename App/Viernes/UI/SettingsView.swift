@@ -20,7 +20,7 @@ struct SettingsView: View {
                     row(icon: "arrow.up.forward.app", title: "Claude", detail: model.settings.claude.mode.displayName, status: nil)
                 }.accessibilityIdentifier("settings-claude")
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Voz") {
                 NavigationLink { VoicePickerView() } label: {
@@ -30,7 +30,7 @@ struct SettingsView: View {
                     row(icon: "mic", title: "Escucha y activación", detail: model.settings.wakeWordEnabled ? "Palabra «Viernes» activa (app abierta)" : "Pulsar para hablar", status: nil)
                 }.accessibilityIdentifier("settings-listening")
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Datos y seguridad") {
                 NavigationLink { PrivacyView() } label: {
@@ -40,29 +40,29 @@ struct SettingsView: View {
                     row(icon: "checkmark.shield", title: "Permisos", detail: "Micrófono, voz, recordatorios, calendario", status: nil)
                 }.accessibilityIdentifier("settings-permissions")
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Siri y Atajos") {
                 NavigationLink { SiriHelpView() } label: {
                     row(icon: "sparkles", title: "Siri y Atajos", detail: "Cómo abrir y hablar con Viernes", status: nil)
                 }
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Apariencia") {
                 Toggle("Efectos reducidos (menos batería)", isOn: $model.settings.reducedEffects)
                 Toggle("Respuesta háptica", isOn: $model.settings.hapticsEnabled)
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Acerca de") {
                 LabeledContent("Versión", value: "0.1.0 (primera versión, sin probar en iPhone)")
                 Text("Viernes es una identidad original. No reemplaza a Siri ni usa la API de Anthropic.")
                     .font(.footnote).foregroundStyle(Theme.textSecondary)
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
         }
-        .holoList()
+        .chromeList()
         .navigationTitle("Configuración")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { dismiss() } } }
@@ -86,7 +86,7 @@ struct SettingsView: View {
 
     private func row(icon: String, title: String, detail: String, status: String?) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon).foregroundStyle(Theme.cyan).frame(width: 26)
+            Image(systemName: icon).foregroundStyle(Theme.accent).frame(width: 26)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(Theme.textPrimary)
                 Text(detail).font(.caption).foregroundStyle(Theme.textSecondary)

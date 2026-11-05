@@ -39,6 +39,8 @@ final class AppModel: ObservableObject {
     @Published var streamingText = ""
     @Published var liveTranscript = ""
     @Published var liveActions: [ActionRecord] = []
+    /// Herramienta que se está ejecutando de verdad (nil si ninguna). Alimenta la animación y el texto de estado.
+    @Published var activeTool: String?
     @Published var audioLevel: Float = 0
     @Published var speakPulse = Date.distantPast
     @Published var engineStatus: EngineStatus = .notLoaded
@@ -58,6 +60,9 @@ final class AppModel: ObservableObject {
     @Published var settings: AppSettings {
         didSet { if settings != oldValue { settingsChanged(from: oldValue) } }
     }
+
+    /// No hay una respuesta generándose (los botones de repetir/copiar solo aparecen entonces).
+    var generationIdle: Bool { generationTask == nil }
 
     /// El núcleo muestra «Sin cerebro» cuando no hay motor utilizable y no está ocupado con otra cosa.
     var displayState: CoreState {
@@ -455,18 +460,23 @@ final class AppModel: ObservableObject {
             switch event {
             case .thinking:
                 break
+            case .toolStarted(let name):
+                activeTool = name
             case .delta(let delta):
                 streamingText += delta
                 if speak { for sentence in streamer.feed(delta) { speaker.enqueue(sentence) } }
             case .action(let record):
+                activeTool = nil
                 liveActions.append(record)
             case .completed(let message):
+                activeTool = nil
                 if speak, let rest = streamer.flush() { speaker.enqueue(rest) }
                 messages.append(message)
                 streamingText = ""
                 liveActions = []
                 await persistConversation()
             case .failed(let reason):
+                activeTool = nil
                 streamingText = ""
                 appendSystemNotice(reason)
                 enterError()
@@ -480,6 +490,14 @@ final class AppModel: ObservableObject {
         generationTask = nil
         streamingText = ""
         liveActions = []
+        activeTool = nil
+    }
+
+    /// Vuelve a decir en voz alta una respuesta ya escrita (botón de la conversación).
+    func replay(_ text: String) {
+        guard generationTask == nil, coreState == .idle || coreState == .speaking else { return }
+        speaker.stop()
+        speaker.enqueue(text)
     }
 
     private func notReadyExplanation() -> String {

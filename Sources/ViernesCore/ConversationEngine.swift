@@ -3,6 +3,7 @@ import Foundation
 public enum ConversationEvent: Sendable {
     case thinking
     case delta(String)                       // texto visible (sin etiquetas de herramienta ni <think>)
+    case toolStarted(String)                 // una herramienta VA a ejecutarse (antes de confirmar/ejecutar); anima la UI
     case action(ActionRecord)                // acción realmente intentada, con su resultado
     case completed(ChatMessage)
     case failed(String)
@@ -151,6 +152,7 @@ public actor ConversationEngine {
                                                 outcome: .failed("El formato de la llamada no era válido."), date: clock()))
                     continue
                 }
+                out.yield(.toolStarted(call.name))
                 records.append(await perform(call))
             }
             if toolBlocks.isEmpty && filter.unterminatedBlocks > 0 && roundVisible.isEmpty {

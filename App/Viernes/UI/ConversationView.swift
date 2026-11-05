@@ -1,32 +1,81 @@
 import SwiftUI
+import UIKit
 import ViernesCore
 
-/// Conversación sobre el núcleo: mensajes recientes, texto en vivo, acciones reales y respuesta en streaming.
+/// Frases de estado en español para cada herramienta (solo se muestran cuando la herramienta se está ejecutando de verdad).
+enum ToolPhrases {
+    static func running(_ tool: String) -> String {
+        switch tool {
+        case "get_weather": return "Consultando el clima…"
+        case "create_reminder": return "Creando el recordatorio…"
+        case "list_reminders": return "Revisando tus recordatorios…"
+        case "complete_reminder": return "Completando el recordatorio…"
+        case "create_event": return "Añadiendo al calendario…"
+        case "open_app": return "Abriendo la app…"
+        case "open_url": return "Abriendo el enlace…"
+        case "run_shortcut": return "Ejecutando el atajo…"
+        case "ask_claude": return "Preguntando a Claude…"
+        case "save_memory", "search_memory", "forget_memory": return "Consultando tu memoria…"
+        case "device_info": return "Consultando el dispositivo…"
+        default: return "Ejecutando una acción…"
+        }
+    }
+
+    static func icon(_ tool: String) -> String {
+        switch tool {
+        case "get_weather": return "cloud.sun"
+        case "create_reminder", "list_reminders", "complete_reminder": return "checklist"
+        case "create_event": return "calendar"
+        case "open_app", "open_url": return "arrow.up.forward.app"
+        case "run_shortcut": return "bolt"
+        case "ask_claude": return "sparkles"
+        case "save_memory", "search_memory", "forget_memory": return "brain"
+        case "device_info": return "iphone"
+        default: return "gearshape"
+        }
+    }
+}
+
+/// Conversación: mensajes del usuario en burbuja compacta, respuestas de Viernes como texto limpio con una línea de energía,
+/// tarjetas para lo que REALMENTE hicieron las herramientas y un indicador de procesamiento.
 struct ConversationView: View {
     @EnvironmentObject var model: AppModel
+
+    private var lastAssistantID: UUID? {
+        model.messages.last(where: { $0.role == .assistant })?.id
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(model.messages) { message in
-                        MessageBubble(message: message).id(message.id)
+                        if message.role == .user {
+                            UserBubble(text: message.text).id(message.id)
+                        } else {
+                            AssistantMessage(message: message, isLast: message.id == lastAssistantID && model.generationIdle)
+                                .id(message.id)
+                        }
                     }
                     if !model.liveTranscript.isEmpty {
-                        bubble(text: model.liveTranscript, role: .user, dim: true).id("live")
+                        UserBubble(text: model.liveTranscript, dim: true).id("live")
                     }
-                    ForEach(model.liveActions) { ActionChip(record: $0) }
+                    ForEach(model.liveActions) { ActionCard(record: $0) }
                     if !model.streamingText.isEmpty {
-                        bubble(text: model.streamingText, role: .assistant, dim: false).id("stream")
+                        StreamingMessage(text: model.streamingText).id("stream")
+                    } else if model.coreState == .thinking {
+                        ThinkingIndicator(label: model.activeTool.map(ToolPhrases.running) ?? "Pensando…").id("thinking")
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .padding(.top, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 6)
             }
             .scrollIndicators(.hidden)
             .onChange(of: model.messages.count) { _, _ in scroll(proxy) }
             .onChange(of: model.streamingText) { _, _ in scroll(proxy) }
             .onChange(of: model.liveTranscript) { _, _ in scroll(proxy) }
+            .onChange(of: model.coreState) { _, _ in scroll(proxy) }
         }
         .accessibilityIdentifier("conversation")
     }
@@ -34,76 +83,160 @@ struct ConversationView: View {
     private func scroll(_ proxy: ScrollViewProxy) {
         withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
     }
-
-    private func bubble(text: String, role: ChatRole, dim: Bool) -> some View {
-        Text(text)
-            .font(.system(size: 15, weight: .regular, design: .rounded))
-            .foregroundStyle(role == .user ? Theme.textSecondary : Theme.textPrimary)
-            .opacity(dim ? 0.7 : 1)
-            .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
-    }
 }
 
-struct MessageBubble: View {
-    let message: ChatMessage
+struct UserBubble: View {
+    let text: String
+    var dim: Bool = false
 
     var body: some View {
-        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-            Text(message.text)
-                .font(.system(size: 15, weight: .regular, design: .rounded))
-                .foregroundStyle(message.role == .user ? Theme.textSecondary : Theme.textPrimary)
-                .multilineTextAlignment(message.role == .user ? .trailing : .leading)
-                .textSelection(.enabled)
-            ForEach(message.actions) { ActionChip(record: $0) }
-            if message.role == .assistant, let engine = message.engineName {
-                Text(engine.uppercased()).font(.system(size: 9, design: .monospaced)).tracking(1.5)
-                    .foregroundStyle(engine == "Sistema" ? Theme.amber.opacity(0.8) : Theme.textSecondary.opacity(0.6))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+        Text(text)
+            .font(Theme.body(15))
+            .foregroundStyle(Theme.textPrimary)
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .chromeSurface(tint: Theme.chrome, radius: 18)
+            .opacity(dim ? 0.65 : 1)
+            .padding(.leading, 56)
+            .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
-/// Muestra lo que REALMENTE pasó con una herramienta (ejecutada / rechazada / falló).
-struct ActionChip: View {
+/// Respuesta de Viernes: texto limpio con una línea de energía a la izquierda (no una tarjeta enorme).
+struct AssistantMessage: View {
+    let message: ChatMessage
+    let isLast: Bool
+    @EnvironmentObject var model: AppModel
+
+    private var isSystemNotice: Bool { message.engineName == "Sistema" }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Capsule()
+                .fill(LinearGradient(colors: [isSystemNotice ? Theme.amber : Theme.accent, Color.clear], startPoint: .top, endPoint: .bottom))
+                .frame(width: 2)
+            VStack(alignment: .leading, spacing: 8) {
+                if let engine = message.engineName {
+                    Text("VIERNES · \(engine.uppercased())")
+                        .font(Theme.mono(9)).tracking(1.8)
+                        .foregroundStyle(isSystemNotice ? Theme.amber.opacity(0.9) : Theme.textSecondary.opacity(0.8))
+                }
+                Text(message.text)
+                    .font(Theme.body(16))
+                    .foregroundStyle(Theme.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .textSelection(.enabled)
+                ForEach(message.actions) { ActionCard(record: $0) }
+                if isLast && !isSystemNotice { actionRow }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 12)
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                if model.coreState == .speaking { model.interrupt() } else { model.replay(message.text) }
+            } label: {
+                Image(systemName: model.coreState == .speaking ? "stop.fill" : "speaker.wave.2")
+            }
+            .buttonStyle(ChromeIconButtonStyle(size: 32))
+            .accessibilityLabel(model.coreState == .speaking ? "Detener la voz" : "Escuchar de nuevo")
+            .accessibilityIdentifier("replay-message")
+
+            Button { UIPasteboard.general.string = message.text } label: { Image(systemName: "doc.on.doc") }
+                .buttonStyle(ChromeIconButtonStyle(size: 32))
+                .accessibilityLabel("Copiar respuesta")
+                .accessibilityIdentifier("copy-message")
+        }
+        .padding(.top, 2)
+    }
+}
+
+/// Respuesta que está llegando por streaming, con un cursor de energía.
+struct StreamingMessage: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Capsule()
+                .fill(LinearGradient(colors: [Theme.accent, Color.clear], startPoint: .top, endPoint: .bottom))
+                .frame(width: 2)
+            (Text(text) + Text(" ▍").foregroundColor(Theme.accent))
+                .font(Theme.body(16))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.trailing, 12)
+    }
+}
+
+/// Indicador de procesamiento real: tres puntos de energía y, si hay herramienta en curso, qué está haciendo.
+struct ThinkingIndicator: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            TimelineView(.animation(minimumInterval: 0.1)) { timeline in
+                let t: Double = timeline.date.timeIntervalSinceReferenceDate
+                HStack(spacing: 5) {
+                    ForEach(0..<3, id: \.self) { index in
+                        let wave: Double = sin(t * 4 - Double(index) * 0.8) * 0.5 + 0.5
+                        Circle().fill(Theme.accent).frame(width: 6, height: 6).opacity(0.25 + 0.75 * wave * wave)
+                    }
+                }
+            }
+            Text(label).font(Theme.mono(11)).foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.leading, 14)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("thinking-indicator")
+    }
+}
+
+/// Tarjeta de lo que REALMENTE pasó con una herramienta (ejecutada / rechazada / falló).
+struct ActionCard: View {
     let record: ActionRecord
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 12, weight: .semibold))
-                if !record.summary.isEmpty { Text(record.summary).font(.system(size: 11)).lineLimit(2).opacity(0.85) }
-                if let detail = detail { Text(detail).font(.system(size: 11)).lineLimit(3).opacity(0.85) }
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: ToolPhrases.icon(record.tool))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(color.opacity(0.12)))
+                .overlay(Circle().strokeBorder(color.opacity(0.45), lineWidth: 0.7))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(Theme.mono(9, weight: .semibold)).tracking(1.6).foregroundStyle(color)
+                if !record.summary.isEmpty {
+                    Text(record.summary).font(Theme.body(13, weight: .medium)).foregroundStyle(Theme.textPrimary).lineLimit(3)
+                }
+                if let detail = detail {
+                    Text(detail).font(Theme.body(12)).foregroundStyle(Theme.textSecondary).lineLimit(5)
+                }
             }
+            Spacer(minLength: 0)
         }
-        .foregroundStyle(color)
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(color.opacity(0.35), lineWidth: 0.6))
+        .padding(10)
+        .chromeSurface(tint: color, radius: 12)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("action-chip")
     }
 
-    private var icon: String {
-        switch record.outcome {
-        case .executed: return "checkmark.seal"
-        case .declined: return "hand.raised.slash"
-        case .failed: return "exclamationmark.triangle"
-        }
-    }
     private var color: Color {
         switch record.outcome {
-        case .executed: return Theme.cyan
+        case .executed: return Theme.accent
         case .declined: return Theme.amber
         case .failed: return Theme.alert
         }
     }
     private var title: String {
         switch record.outcome {
-        case .executed: return "Ejecutado"
-        case .declined: return "Rechazado por ti"
-        case .failed: return "No se ejecutó"
+        case .executed: return "EJECUTADO"
+        case .declined: return "RECHAZADO POR TI"
+        case .failed: return "NO SE EJECUTÓ"
         }
     }
     private var detail: String? {

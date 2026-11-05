@@ -2,6 +2,25 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.3.0] — Rediseño visual Black Chrome / Neural Orange (sin verificar en dispositivo)
+
+### Por qué
+La interfaz azul/cian se parecía demasiado a la de otros asistentes de IA. Se pidió una identidad propia, cinematográfica y reconocible, sin perder funcionalidad.
+
+### Cambiado
+- **Sistema de diseño** (`Theme.swift`): materiales (negro, grafito, cromo, plata), un único color de energía (naranja eléctrico; ámbar solo para avisos, rojo para errores), tipografía ancha para títulos, medidas, superficies con luz de canto (`chromeSurface`), botones y paneles. Todas las pantallas se migraron por renombrado de tokens (`cyan→accent`, `deep→carbon`, `abyss→ink`…), así que Ajustes, Cerebro, Voz, Memoria, Historial, Permisos y Onboarding comparten la identidad.
+- **Núcleo nuevo** (`ChromeCoreView`): tres anillos de cromo deformados y entrelazados (mitades traseras y delanteras para dar profundidad), segmentos incandescentes, órbitas finas con satélites y chispa central con destellos. Sustituye al núcleo holográfico azul (`HoloCoreView`, eliminado). Estados reales: escucha (ondas y deformación según el nivel del micrófono), pensamiento (partículas en espiral hacia el centro, anillos concentrados), habla (pulso y onda por palabra), **herramientas** (nodos conectados al centro; solo mientras una herramienta se ejecuta de verdad) y espera (casi quieto, 12 fps). Los parámetros se suavizan entre estados; respeta «Reducir movimiento» y el ajuste de efectos reducidos; en segundo plano no dibuja.
+- **Pantalla de inicio**: marca y subtítulo, estado, núcleo grande, mensaje contextual (saludo según la hora, o «Te escucho» con la transcripción en vivo, o la herramienta en curso), accesos rápidos (Tareas, Clima, Claude, Memoria: solo capacidades que existen) y **cápsula de voz** integrada con el núcleo (ondas naranjas a ambos lados del micrófono).
+- **Conversación**: al haber mensajes el núcleo se compacta y la conversación ocupa la pantalla. Mensajes del usuario en burbuja compacta; respuestas de Viernes como texto limpio con una línea de energía (no tarjetas enormes); cursor en el streaming; indicador de procesamiento con la herramienta en curso; **tarjetas de acción** con icono por herramienta y resultado real; botones de **escuchar de nuevo / detener** y **copiar** en la última respuesta.
+- **Icono** nuevo (cromo y naranja), generado con `scripts/make-icon.ps1` y revisado a ojo.
+
+### Añadido en el motor (mínimo)
+- Evento `toolStarted` en `ConversationEngine`: la UI sabe cuándo una herramienta VA a ejecutarse (antes de confirmar), para animar el núcleo sin simular nada.
+
+### No verificado
+- Nada del rediseño se ha visto en un dispositivo ni en simulador: se escribió desde Windows. Solo se comprueba que compile y que los identificadores de las pruebas de UI sigan existiendo. Los riesgos son estéticos (proporciones, legibilidad, rendimiento del `Canvas` en un iPhone 14 Pro Max) y de compilación de SwiftUI.
+- Pendiente de este rediseño: tarjeta visual de clima con datos estructurados (hoy el resultado se muestra como texto en la tarjeta de acción).
+
 ## [0.2.0] — 2026-11-05 — Primeras pruebas en iPhone 14 Pro Max (sin verificar aún en dispositivo)
 
 ### Por qué

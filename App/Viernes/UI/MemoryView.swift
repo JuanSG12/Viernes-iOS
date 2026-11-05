@@ -34,7 +34,7 @@ struct MemoryView: View {
         VStack(spacing: 16) {
             Image(systemName: "lock.fill").font(.system(size: 40, weight: .light)).foregroundStyle(Theme.amber)
             Text("La memoria está protegida").foregroundStyle(Theme.textPrimary)
-            Button("Desbloquear con Face ID") { Task { await model.unlockMemory() } }.buttonStyle(HoloButtonStyle())
+            Button("Desbloquear con Face ID") { Task { await model.unlockMemory() } }.buttonStyle(ChromeButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
@@ -55,11 +55,11 @@ struct MemoryView: View {
                             Text(item.text)
                             Text(item.kind.displayName).font(.caption).foregroundStyle(Theme.textSecondary)
                             HStack {
-                                Button("Guardar") { model.approveMemory(item) }.buttonStyle(HoloButtonStyle())
-                                Button("Descartar") { model.deleteMemory(item) }.buttonStyle(HoloButtonStyle(tint: Theme.amber))
+                                Button("Guardar") { model.approveMemory(item) }.buttonStyle(ChromeButtonStyle())
+                                Button("Descartar") { model.deleteMemory(item) }.buttonStyle(ChromeButtonStyle(tint: Theme.amber))
                             }
                         }
-                        .listRowBackground(Theme.deep.opacity(0.5))
+                        .listRowBackground(Theme.carbon.opacity(0.5))
                     }
                 }
             }
@@ -72,20 +72,20 @@ struct MemoryView: View {
                     Button { editing = item } label: {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 6) {
-                                if item.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(Theme.cyan) }
+                                if item.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(Theme.accent) }
                                 Text(item.text).foregroundStyle(Theme.textPrimary).multilineTextAlignment(.leading)
                             }
                             Text("\(item.kind.displayName) · \(item.updatedAt.formatted(date: .abbreviated, time: .omitted))")
                                 .font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                     }
-                    .listRowBackground(Theme.deep.opacity(0.5))
+                    .listRowBackground(Theme.carbon.opacity(0.5))
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { model.deleteMemory(item) } label: { Label("Borrar", systemImage: "trash") }
                     }
                     .swipeActions(edge: .leading) {
                         Button { var copy = item; copy.pinned.toggle(); model.updateMemory(copy) } label: { Label(item.pinned ? "Desfijar" : "Fijar", systemImage: "pin") }
-                            .tint(Theme.blue)
+                            .tint(Theme.steel)
                     }
                 }
             }
@@ -96,7 +96,7 @@ struct MemoryView: View {
                 }.listRowBackground(Color.clear)
             }
         }
-        .holoList()
+        .chromeList()
         .searchable(text: $query, prompt: "Buscar recuerdos")
         .toolbar {
             ToolbarItem(placement: .primaryAction) { Button { adding = true } label: { Image(systemName: "plus") }.accessibilityLabel("Añadir recuerdo") }
@@ -105,8 +105,8 @@ struct MemoryView: View {
                     .disabled(model.memoryItems.isEmpty && model.pendingMemories.isEmpty).accessibilityLabel("Borrar toda la memoria")
             }
         }
-        .sheet(item: $editing) { item in NavigationStack { MemoryEditor(item: item) }.environmentObject(model).presentationBackground(Theme.abyss) }
-        .sheet(isPresented: $adding) { NavigationStack { MemoryEditor(item: nil) }.environmentObject(model).presentationBackground(Theme.abyss) }
+        .sheet(item: $editing) { item in NavigationStack { MemoryEditor(item: item) }.environmentObject(model).presentationBackground(Theme.ink) }
+        .sheet(isPresented: $adding) { NavigationStack { MemoryEditor(item: nil) }.environmentObject(model).presentationBackground(Theme.ink) }
         .confirmationDialog("¿Borrar toda la memoria?", isPresented: $confirmDeleteAll, titleVisibility: .visible) {
             Button("Borrar todo", role: .destructive) { model.deleteAllMemory() }
         } message: { Text("Se eliminarán todos los recuerdos y sugerencias. No se puede deshacer.") }
@@ -136,7 +136,7 @@ struct MemoryEditor: View {
                 Section { Label("Parece contener datos sensibles (contraseña, tarjeta, documento o clave). Viernes no los guarda.", systemImage: "exclamationmark.shield").foregroundStyle(Theme.alert).font(.footnote) }
             }
         }
-        .holoList()
+        .chromeList()
         .navigationTitle(item == nil ? "Nuevo recuerdo" : "Editar recuerdo")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

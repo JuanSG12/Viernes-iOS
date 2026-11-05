@@ -27,13 +27,13 @@ struct HistoryView: View {
                             .font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
-                .listRowBackground(Theme.deep.opacity(0.5))
+                .listRowBackground(Theme.carbon.opacity(0.5))
                 .swipeActions {
                     Button(role: .destructive) { model.deleteConversation(snapshot) } label: { Label("Borrar", systemImage: "trash") }
                 }
             }
         }
-        .holoList()
+        .chromeList()
         .navigationTitle("Historial")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -71,7 +71,7 @@ struct ConversationDetailView: View {
                 Button("Resumir a Memoria") { model.saveSummaryToMemory(of: snapshot) }
             }
         }
-        .tint(Theme.cyan)
-        .overlay(alignment: .top) { if let note = model.busyNote { GlassPanel { Text(note) }.padding() } }
+        .tint(Theme.accent)
+        .overlay(alignment: .top) { if let note = model.busyNote { ChromePanel { Text(note) }.padding() } }
     }
 }

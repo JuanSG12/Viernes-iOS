@@ -9,7 +9,7 @@ struct VoicePickerView: View {
             Section {
                 NavigationLink { ElevenLabsVoiceView() } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "waveform.badge.mic").foregroundStyle(Theme.cyan).frame(width: 26)
+                        Image(systemName: "waveform.badge.mic").foregroundStyle(Theme.accent).frame(width: 26)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Voz neuronal (ElevenLabs)").foregroundStyle(Theme.textPrimary)
                             Text(model.settings.voice.elevenLabs?.isUsable == true ? "ACTIVA · más humana, en la nube" : "Opcional · clave gratuita, suena mucho más humana")
@@ -18,7 +18,7 @@ struct VoicePickerView: View {
                     }
                 }.accessibilityIdentifier("voice-cloud")
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Ajustes de habla") {
                 Toggle("Hablar las respuestas", isOn: $model.settings.voice.speakResponses)
@@ -27,10 +27,10 @@ struct VoicePickerView: View {
                 slider("Tono", value: Binding(get: { Double(model.settings.voice.pitch) }, set: { model.settings.voice.pitch = Float($0) }), range: 0.7...1.3, format: "%.2f")
                 slider("Pausas entre frases", value: $model.settings.voice.pauseScale, range: 0...2.5, format: "×%.1f")
                 Button("Escuchar muestra") { model.previewVoice(identifier: model.settings.voice.voiceIdentifier) }
-                    .buttonStyle(HoloButtonStyle()).accessibilityIdentifier("voice-preview")
-                Button("Detener") { model.interrupt() }.buttonStyle(HoloButtonStyle(tint: Theme.amber))
+                    .buttonStyle(ChromeButtonStyle()).accessibilityIdentifier("voice-preview")
+                Button("Detener") { model.interrupt() }.buttonStyle(ChromeButtonStyle(tint: Theme.amber))
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section {
                 Button { model.settings.voice.voiceIdentifier = nil } label: {
@@ -41,7 +41,7 @@ struct VoicePickerView: View {
                                 .font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                         Spacer()
-                        if model.settings.voice.voiceIdentifier == nil { Image(systemName: "checkmark").foregroundStyle(Theme.cyan) }
+                        if model.settings.voice.voiceIdentifier == nil { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
                     }
                 }
                 ForEach(model.voices) { voice in
@@ -53,7 +53,7 @@ struct VoicePickerView: View {
                                     .font(.caption).foregroundStyle(Theme.textSecondary)
                             }
                             Spacer()
-                            if model.settings.voice.voiceIdentifier == voice.identifier { Image(systemName: "checkmark").foregroundStyle(Theme.cyan) }
+                            if model.settings.voice.voiceIdentifier == voice.identifier { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
                         }
                     }
                 }
@@ -63,9 +63,9 @@ struct VoicePickerView: View {
             } header: { Text("Voz") } footer: {
                 Text("Para una voz más natural, descarga una voz «Mejorada» o «Premium» de español en Ajustes › Accesibilidad › Contenido hablado › Voces › Español. Las voces se procesan en el dispositivo, sin internet.")
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
         }
-        .holoList()
+        .chromeList()
         .navigationTitle("Voz y habla")
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear { model.interrupt() }

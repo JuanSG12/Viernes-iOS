@@ -38,19 +38,19 @@ struct CloudBrainView: View {
                 Text(preset.note).font(.caption).foregroundStyle(Theme.textSecondary)
                 Button("Conseguir una clave gratuita") {
                     if let url = URL(string: preset.keyPageURL) { openURL(url) }
-                }.buttonStyle(HoloButtonStyle())
+                }.buttonStyle(ChromeButtonStyle())
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section {
                 if hasKey {
-                    Label("Clave guardada en el Llavero de este iPhone", systemImage: "checkmark.seal").foregroundStyle(Theme.cyan)
+                    Label("Clave guardada en el Llavero de este iPhone", systemImage: "checkmark.seal").foregroundStyle(Theme.accent)
                 }
                 SecureField(hasKey ? "Pegar una clave nueva" : "Pega aquí tu clave", text: $keyInput)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .accessibilityIdentifier("cloud-key")
                 Button("Guardar clave") { saveKey() }
-                    .buttonStyle(HoloButtonStyle())
+                    .buttonStyle(ChromeButtonStyle())
                     .disabled(keyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("cloud-key-save")
                 if let keyError { Text(keyError).font(.caption).foregroundStyle(Theme.alert) }
@@ -65,7 +65,7 @@ struct CloudBrainView: View {
             } header: { Text("Clave") } footer: {
                 Text("La clave se guarda solo en el Llavero (no sale de este iPhone ni entra en copias de seguridad) y solo se envía a \(preset.displayName).")
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section("Modelo") {
                 TextField("Nombre del modelo", text: Binding(
@@ -74,34 +74,34 @@ struct CloudBrainView: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .accessibilityIdentifier("cloud-model")
                 Button(testing ? "Probando…" : "Probar conexión") { runTest() }
-                    .buttonStyle(HoloButtonStyle())
+                    .buttonStyle(ChromeButtonStyle())
                     .disabled(testing || !hasKey)
                     .accessibilityIdentifier("cloud-test")
                 if let report {
                     Label(report.message, systemImage: report.ok ? "checkmark.circle" : "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(report.ok ? Theme.cyan : Theme.alert)
+                        .font(.caption).foregroundStyle(report.ok ? Theme.accent : Theme.alert)
                 }
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
 
             Section {
                 if model.activeModel.isCloud {
-                    Label("Viernes está usando la nube como cerebro", systemImage: "cloud.fill").foregroundStyle(Theme.cyan)
+                    Label("Viernes está usando la nube como cerebro", systemImage: "cloud.fill").foregroundStyle(Theme.accent)
                     Button("Volver al modelo local") {
                         Task { await model.activateModel(id: "qwen3-1.7b-4bit") }
-                    }.buttonStyle(HoloButtonStyle(tint: Theme.amber))
+                    }.buttonStyle(ChromeButtonStyle(tint: Theme.amber))
                 } else {
                     Button("Usar la nube como cerebro") {
                         Task { await model.activateModel(id: ModelCatalog.cloudID) }
                     }
-                    .buttonStyle(HoloButtonStyle())
+                    .buttonStyle(ChromeButtonStyle())
                     .disabled(!hasKey)
                     .accessibilityIdentifier("cloud-activate")
                 }
             }
-            .listRowBackground(Theme.deep.opacity(0.5))
+            .listRowBackground(Theme.carbon.opacity(0.5))
         }
-        .holoList()
+        .chromeList()
         .navigationTitle("Cerebro en la nube")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { hasKey = CloudKeyStore.hasKey(providerID: preset.id) }
