@@ -51,22 +51,7 @@ enum Theme {
     }
 
     // MARK: Fondo (estático: cero coste de animación)
-    static var background: some View {
-        ZStack {
-            LinearGradient(colors: [ink, graphite, ink], startPoint: .top, endPoint: .bottom)
-            // Reflejo cromado diagonal.
-            LinearGradient(stops: [
-                .init(color: .clear, location: 0.0),
-                .init(color: silver.opacity(0.055), location: 0.32),
-                .init(color: .clear, location: 0.48),
-                .init(color: accent.opacity(0.05), location: 0.92)
-            ], startPoint: .topLeading, endPoint: .bottomTrailing)
-            // Luz cálida desde abajo a la derecha y destello frío arriba a la izquierda.
-            RadialGradient(colors: [accent.opacity(0.17), .clear], center: UnitPoint(x: 0.88, y: 1.0), startRadius: 10, endRadius: 400)
-            RadialGradient(colors: [silver.opacity(0.07), .clear], center: UnitPoint(x: 0.08, y: 0.0), startRadius: 10, endRadius: 320)
-        }
-        .ignoresSafeArea()
-    }
+    static var background: some View { ChromeBackdrop() }
 
     static func label(_ text: String) -> some View {
         Text(text.uppercased())
@@ -188,6 +173,58 @@ struct ViernesMark: View {
             context.fill(Path(ellipseIn: CGRect(x: c.x - 2.2, y: c.y - 2.2, width: 4.4, height: 4.4)), with: .color(Theme.accent))
         }
         .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Fondo de la referencia: negro profundo con barridos de cromo oscuro y vetas de luz naranja. Se dibuja una sola vez
+/// (no tiene entradas, así que SwiftUI no lo redibuja cuando cambian el audio o el estado).
+struct ChromeBackdrop: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Theme.ink, Theme.graphite, Theme.ink], startPoint: .top, endPoint: .bottom)
+            Canvas { context, size in
+                let w = size.width, h = size.height
+
+                // Barridos brillantes de cromo negro (formas curvas amplias, muy tenues).
+                func sweep(_ from: CGPoint, _ c1: CGPoint, _ c2: CGPoint, _ to: CGPoint, width: CGFloat, silver: Double) {
+                    var path = Path()
+                    path.move(to: from)
+                    path.addCurve(to: to, control1: c1, control2: c2)
+                    context.drawLayer { layer in
+                        layer.addFilter(.blur(radius: width * 0.35))
+                        layer.stroke(path, with: .linearGradient(
+                            Gradient(colors: [.clear, Theme.silver.opacity(silver), Theme.chrome.opacity(silver * 0.5), .clear]),
+                            startPoint: from, endPoint: to), style: StrokeStyle(lineWidth: width, lineCap: .round))
+                    }
+                }
+                sweep(CGPoint(x: -0.15 * w, y: 0.58 * h), CGPoint(x: 0.35 * w, y: 0.86 * h), CGPoint(x: 0.7 * w, y: 0.05 * h), CGPoint(x: 1.15 * w, y: 0.28 * h), width: 110, silver: 0.10)
+                sweep(CGPoint(x: -0.1 * w, y: 0.95 * h), CGPoint(x: 0.3 * w, y: 0.70 * h), CGPoint(x: 0.75 * w, y: 1.02 * h), CGPoint(x: 1.1 * w, y: 0.74 * h), width: 80, silver: 0.07)
+                sweep(CGPoint(x: -0.1 * w, y: 0.10 * h), CGPoint(x: 0.3 * w, y: 0.30 * h), CGPoint(x: 0.5 * w, y: -0.05 * h), CGPoint(x: 1.1 * w, y: 0.12 * h), width: 70, silver: 0.06)
+
+                // Vetas de luz naranja incandescente en las esquinas inferiores.
+                func streak(_ from: CGPoint, _ c1: CGPoint, _ c2: CGPoint, _ to: CGPoint, glow: CGFloat) {
+                    var path = Path()
+                    path.move(to: from)
+                    path.addCurve(to: to, control1: c1, control2: c2)
+                    let shading = GraphicsContext.Shading.linearGradient(
+                        Gradient(colors: [.clear, Theme.accent, Theme.ember.opacity(0.9), .clear]), startPoint: from, endPoint: to)
+                    context.drawLayer { layer in
+                        layer.addFilter(.blur(radius: glow))
+                        layer.opacity = 0.65
+                        layer.stroke(path, with: shading, style: StrokeStyle(lineWidth: glow * 0.7, lineCap: .round))
+                    }
+                    context.opacity = 0.9
+                    context.stroke(path, with: shading, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                    context.opacity = 1
+                }
+                streak(CGPoint(x: 0.52 * w, y: 1.04 * h), CGPoint(x: 0.72 * w, y: 0.96 * h), CGPoint(x: 0.9 * w, y: 0.86 * h), CGPoint(x: 1.06 * w, y: 0.70 * h), glow: 16)
+                streak(CGPoint(x: -0.06 * w, y: 0.84 * h), CGPoint(x: 0.10 * w, y: 0.93 * h), CGPoint(x: 0.28 * w, y: 1.00 * h), CGPoint(x: 0.46 * w, y: 1.04 * h), glow: 12)
+            }
+            RadialGradient(colors: [Theme.accent.opacity(0.13), .clear], center: UnitPoint(x: 0.9, y: 1.0), startRadius: 10, endRadius: 360)
+            RadialGradient(colors: [Theme.silver.opacity(0.06), .clear], center: UnitPoint(x: 0.1, y: 0.0), startRadius: 10, endRadius: 300)
+        }
+        .ignoresSafeArea()
         .accessibilityHidden(true)
     }
 }

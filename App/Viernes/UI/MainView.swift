@@ -1,6 +1,27 @@
 import SwiftUI
 import ViernesCore
 
+/// Ayudas SOLO para las pruebas y las capturas del CI (`--uitest`): permiten fijar un estado visual para fotografiarlo.
+/// En el uso real no existen: el estado del núcleo sale siempre del funcionamiento verdadero de la app.
+private enum QAOverrides {
+    private static var active: Bool { ProcessInfo.processInfo.arguments.contains("--uitest") }
+
+    static var coreState: CoreVisualState? {
+        guard active else { return nil }
+        let prefix = "--uitest-core-state="
+        guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) }) else { return nil }
+        switch String(argument.dropFirst(prefix.count)) {
+        case "listening": return .listening
+        case "thinking": return .thinking
+        case "speaking": return .speaking
+        case "executing": return .executing
+        case "error": return .error
+        case "offline": return .offline
+        default: return .idle
+        }
+    }
+}
+
 struct MainView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var confirmation: ConfirmationCenter
@@ -16,16 +37,19 @@ struct MainView: View {
     /// Con mensajes en pantalla la conversación pasa a primer plano y el núcleo se compacta.
     private var inConversation: Bool { !model.messages.isEmpty || !model.streamingText.isEmpty }
 
+    private var visualState: CoreVisualState {
+        QAOverrides.coreState ?? CoreVisualState(core: model.displayState, executing: model.activeTool != nil)
+    }
+
     var body: some View {
         ZStack {
             Theme.background
             VStack(spacing: 0) {
                 header
-                statusChips.padding(.top, 10)
                 if inConversation { conversationLayout } else { homeLayout }
                 controls
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 18)
 
             if let banner = model.banner {
                 VStack {
@@ -64,67 +88,54 @@ struct MainView: View {
         }
     }
 
-    // MARK: Cabecera
+    // MARK: Cabecera (marca a la izquierda, engranaje a la derecha)
 
     private var header: some View {
         HStack(spacing: 12) {
-            ViernesMark(size: 38)
+            ViernesMark(size: 42)
             VStack(alignment: .leading, spacing: 1) {
                 Text("VIERNES")
-                    .font(Theme.display(16, weight: .semibold)).tracking(4)
+                    .font(Theme.display(18, weight: .semibold)).tracking(6)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1).minimumScaleFactor(0.7)
-                Text("Tu asistente personal")
-                    .font(Theme.body(12)).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                Text(inConversation ? "Conversación" : "Tu asistente personal")
+                    .font(Theme.body(13)).foregroundStyle(Theme.textSecondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            HStack(spacing: 6) {
-                Button { sheet = .history } label: { Image(systemName: "clock.arrow.circlepath") }
-                    .accessibilityLabel("Historial").accessibilityIdentifier("open-history")
-                Button { sheet = .memory } label: { Image(systemName: "brain.head.profile") }
-                    .accessibilityLabel("Memoria").accessibilityIdentifier("open-memory")
-                Button { model.newConversation() } label: { Image(systemName: "square.and.pencil") }
-                    .accessibilityLabel("Nueva conversación").accessibilityIdentifier("new-conversation")
-                Button { sheet = .settings } label: { Image(systemName: "slider.horizontal.3") }
-                    .accessibilityLabel("Configuración").accessibilityIdentifier("open-settings")
+            if inConversation {
+                Menu { moreItems } label: { Image(systemName: "ellipsis") }
+                    .buttonStyle(ChromeIconButtonStyle(size: 40))
+                    .accessibilityLabel("Más opciones").accessibilityIdentifier("open-more")
             }
-            .buttonStyle(ChromeIconButtonStyle(size: 34))
+            Button { sheet = .settings } label: { Image(systemName: "gearshape") }
+                .buttonStyle(ChromeIconButtonStyle(size: 40))
+                .accessibilityLabel("Configuración").accessibilityIdentifier("open-settings")
         }
         .padding(.top, 6)
     }
 
-    private var statusChips: some View {
-        HStack(spacing: 8) {
-            chip(icon: "cpu", text: model.activeModel.isSystemModel ? "Apple Intelligence" : (model.activeModel.displayName.components(separatedBy: " (").first ?? ""),
-                 tint: model.engineStatus.isReady ? Theme.accent : Theme.amber)
-            chip(icon: model.isOnline ? "wifi" : "wifi.slash", text: model.isOnline ? "En línea" : "Sin conexión · local",
-                 tint: model.isOnline ? Theme.textSecondary : Theme.amber)
-            if model.settings.claude.mode != .disabled {
-                chip(icon: "arrow.up.forward.app", text: "Claude: \(model.settings.claude.mode == .openApp ? "abrir app" : "Atajo")", tint: Theme.silver)
-            }
-        }
-        .lineLimit(1)
-    }
-
-    private func chip(icon: String, text: String, tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-            Text(text)
-        }
-        .font(Theme.mono(11))
-        .foregroundStyle(tint)
-        .padding(.horizontal, 9).padding(.vertical, 5)
-        .background(Capsule().fill(Theme.carbon.opacity(0.7)))
-        .overlay(Capsule().strokeBorder(tint.opacity(0.35), lineWidth: 0.7))
+    /// Acciones secundarias, en un menú para que la pantalla principal quede limpia.
+    @ViewBuilder private var moreItems: some View {
+        Button { sheet = .memory } label: { Label("Memoria", systemImage: "brain.head.profile") }
+            .accessibilityIdentifier("open-memory")
+        Button { sheet = .history } label: { Label("Historial", systemImage: "clock.arrow.circlepath") }
+            .accessibilityIdentifier("open-history")
+        Button { model.newConversation() } label: { Label("Nueva conversación", systemImage: "square.and.pencil") }
+            .accessibilityIdentifier("new-conversation")
+        Button {
+            model.typedDraft = "Pregúntale a Claude "
+            keyboardMode = true
+            inputFocused = true
+        } label: { Label("Preguntar a Claude", systemImage: "sparkles") }
+            .accessibilityIdentifier("menu-claude")
     }
 
     // MARK: Núcleo
 
     private func core(compact: Bool) -> some View {
-        ChromeCoreView(state: model.displayState, level: model.audioLevel, pulse: model.speakPulse,
-                       acting: model.activeTool != nil, reducedEffects: model.settings.reducedEffects)
+        ViernesCoreVisual(state: visualState, level: model.audioLevel, pulse: model.speakPulse, reducedEffects: model.settings.reducedEffects)
             .aspectRatio(1, contentMode: .fit)
-            .frame(maxWidth: compact ? CGFloat(96) : CGFloat(340), maxHeight: compact ? CGFloat(96) : CGFloat.infinity)
+            .frame(maxWidth: compact ? CGFloat(84) : CGFloat(380), maxHeight: compact ? CGFloat(84) : CGFloat.infinity)
             .contentShape(Circle())
             .onTapGesture { model.micTapped() }
             .accessibilityAddTraits(.isButton)
@@ -137,12 +148,27 @@ struct MainView: View {
         VStack(spacing: 0) {
             core(compact: false)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.vertical, 6)
-            headline
+                .padding(.top, 2)
+            onlinePill.padding(.top, 2)
+            headline.padding(.top, 14)
             enginePanel
-            quickActions.padding(.top, 14)
-            Spacer(minLength: 8)
+            quickTiles.padding(.top, 18)
+            Spacer(minLength: 6)
         }
+    }
+
+    private var onlinePill: some View {
+        let online = model.isOnline
+        let tint: Color = online ? Color(red: 0.30, green: 0.88, blue: 0.48) : Theme.amber
+        return HStack(spacing: 7) {
+            Circle().fill(tint).frame(width: 7, height: 7).shadow(color: tint.opacity(0.8), radius: 4)
+            Text(online ? "En línea" : "Sin conexión · local").font(Theme.body(13, weight: .medium)).foregroundStyle(tint)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 6)
+        .background(Capsule().fill(Theme.ink.opacity(0.7)))
+        .overlay(Capsule().strokeBorder(tint.opacity(0.55), lineWidth: 0.8))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("online-pill")
     }
 
     private var headlineTexts: (title: String, subtitle: String) {
@@ -160,34 +186,21 @@ struct MainView: View {
         case .error:
             return ("Algo falló", "Revisa el mensaje e inténtalo de nuevo")
         case .idle:
-            return ("¿En qué puedo ayudarte?", greeting)
-        }
-    }
-
-    private var greeting: String {
-        let hour = Calendar.current.component(.hour, from: Date())
-        switch hour {
-        case 5..<12: return "Buenos días"
-        case 12..<19: return "Buenas tardes"
-        default: return "Buenas noches"
+            return ("¿En qué puedo ayudarte?", "Tu inteligencia, en tus manos")
         }
     }
 
     private var headline: some View {
         VStack(spacing: 6) {
-            Text(model.displayState.title.uppercased())
-                .font(Theme.mono(11, weight: .semibold)).tracking(3)
-                .foregroundStyle(Theme.color(for: model.displayState))
-                .accessibilityIdentifier("state-label")
             Text(headlineTexts.title)
-                .font(Theme.display(24, weight: .semibold))
+                .font(Theme.display(26, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.75)
                 .accessibilityIdentifier("headline")
             if !headlineTexts.subtitle.isEmpty {
                 Text(headlineTexts.subtitle)
-                    .font(Theme.body(15)).foregroundStyle(Theme.textSecondary)
+                    .font(Theme.body(16)).foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center).lineLimit(2)
             }
             wakeIndicator
@@ -223,32 +236,31 @@ struct MainView: View {
         }
     }
 
-    /// Accesos rápidos: solo capacidades que existen de verdad.
-    private var quickActions: some View {
-        HStack(spacing: 10) {
-            quickAction(icon: "checklist", title: "Tareas", id: "quick-tasks") { model.submit("Lista mis recordatorios pendientes") }
-            quickAction(icon: "cloud.sun", title: "Clima", id: "quick-weather") { model.submit("¿Qué clima hace hoy?") }
-            quickAction(icon: "sparkles", title: "Claude", id: "quick-claude") {
-                model.typedDraft = "Pregúntale a Claude "
-                keyboardMode = true
-                inputFocused = true
-            }
-            quickAction(icon: "brain.head.profile", title: "Memoria", id: "quick-memory") { sheet = .memory }
+    /// Cuatro mosaicos como en la referencia. Solo capacidades que existen de verdad.
+    private var quickTiles: some View {
+        HStack(spacing: 12) {
+            tile(icon: "calendar", title: "Mi día", id: "quick-today") { model.submit("¿Qué tengo hoy en mi agenda?") }
+            tile(icon: "checkmark.circle", title: "Tareas", id: "quick-tasks") { model.submit("Lista mis recordatorios pendientes") }
+            tile(icon: "cloud.sun", title: "Clima", id: "quick-weather") { model.submit("¿Qué clima hace hoy?") }
+            Menu { moreItems } label: { tileLabel(icon: "square.grid.2x2", title: "Más") }
+                .accessibilityLabel("Más").accessibilityIdentifier("quick-more")
         }
     }
 
-    private func quickAction(icon: String, title: String, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 20, weight: .regular)).foregroundStyle(Theme.accent)
-                Text(title).font(Theme.body(12, weight: .medium)).foregroundStyle(Theme.textPrimary)
-            }
-            .frame(maxWidth: .infinity).frame(height: 64)
-            .chromeSurface(tint: Theme.accent, radius: 16)
+    private func tileLabel(icon: String, title: String) -> some View {
+        VStack(spacing: 7) {
+            Image(systemName: icon).font(.system(size: 22, weight: .light)).foregroundStyle(Theme.silver)
+            Text(title).font(Theme.body(13, weight: .medium)).foregroundStyle(Theme.textPrimary)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityIdentifier(id)
+        .frame(maxWidth: .infinity).frame(height: 78)
+        .chromeSurface(tint: Theme.accent, radius: 18)
+    }
+
+    private func tile(icon: String, title: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { tileLabel(icon: icon, title: title) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityIdentifier(id)
     }
 
     // MARK: Conversación
@@ -258,12 +270,13 @@ struct MainView: View {
             HStack(spacing: 14) {
                 core(compact: true)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.displayState.title.uppercased())
-                        .font(Theme.mono(11, weight: .semibold)).tracking(3)
-                        .foregroundStyle(Theme.color(for: model.displayState))
-                        .accessibilityIdentifier("state-label")
                     Text(headlineTexts.title)
                         .font(Theme.display(15, weight: .medium)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Circle().fill(model.isOnline ? Color(red: 0.30, green: 0.88, blue: 0.48) : Theme.amber).frame(width: 6, height: 6)
+                        Text(model.activeModel.isSystemModel ? "Apple Intelligence" : (model.activeModel.displayName.components(separatedBy: " (").first ?? ""))
+                            .font(Theme.mono(11)).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    }
                     wakeIndicator
                     enginePanel
                 }
@@ -279,7 +292,7 @@ struct MainView: View {
     // MARK: Controles
 
     private var controls: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             if keyboardMode { inputBar }
             HStack(spacing: 10) {
                 controlButton(icon: keyboardMode ? "keyboard.chevron.compact.down" : "keyboard", label: "Teclado", id: "toggle-keyboard") {
@@ -293,8 +306,8 @@ struct MainView: View {
                 }
             }
             Text(dockCaption)
-                .font(Theme.mono(10)).tracking(2)
-                .foregroundStyle(Theme.textSecondary)
+                .font(Theme.body(13)).foregroundStyle(Theme.textSecondary)
+                .accessibilityIdentifier("state-label")
         }
         .padding(.top, 8).padding(.bottom, 8)
         .onChange(of: model.typedDraft) { _, new in if !new.isEmpty { keyboardMode = true } }
@@ -302,16 +315,16 @@ struct MainView: View {
 
     private var dockCaption: String {
         switch model.coreState {
-        case .listening: return "ESCUCHANDO · TOCA PARA TERMINAR"
-        case .thinking: return "TOCA PARA CANCELAR"
-        case .speaking: return "TOCA PARA INTERRUMPIR"
-        default: return "TOCA PARA HABLAR"
+        case .listening: return "Escuchando · toca para terminar"
+        case .thinking: return "Toca para cancelar"
+        case .speaking: return "Toca para interrumpir"
+        default: return "Toca para hablar"
         }
     }
 
     private var inputBar: some View {
         HStack(spacing: 8) {
-            TextField("Escribe a Viernes…", text: $model.typedDraft, axis: .vertical)
+            TextField("Escribe o habla…", text: $model.typedDraft, axis: .vertical)
                 .lineLimit(1...3)
                 .focused($inputFocused)
                 .textFieldStyle(.plain)
@@ -331,7 +344,7 @@ struct MainView: View {
 
     private func controlButton(icon: String, label: String, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: icon) }
-            .buttonStyle(ChromeIconButtonStyle(size: 46))
+            .buttonStyle(ChromeIconButtonStyle(size: 42))
             .accessibilityLabel(label)
             .accessibilityIdentifier(id)
     }

@@ -36,6 +36,32 @@ final class ViernesUITests: XCTestCase {
         while !element.exists && attempts < 10 { app.swipeDown(); attempts += 1 }
     }
 
+    /// Los controles secundarios viven en el menú «Más» (referencia visual). Se busca por identificador y, si hace falta, por texto.
+    private func menuItem(_ app: XCUIApplication, id: String, label: String) -> XCUIElement {
+        let byID = app.buttons[id]
+        if byID.waitForExistence(timeout: 3) { return byID }
+        return app.buttons[label]
+    }
+
+    private func openMemory(_ app: XCUIApplication) {
+        let more = app.buttons["quick-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "Falta el menú Más")
+        more.tap()
+        let item = menuItem(app, id: "open-memory", label: "Memoria")
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "El menú Más no ofrece Memoria")
+        item.tap()
+    }
+
+    func testMoreMenuOffersMemoryHistoryAndNewConversation() {
+        let app = launch()
+        let more = app.buttons["quick-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
+        XCTAssertTrue(menuItem(app, id: "open-memory", label: "Memoria").waitForExistence(timeout: 5))
+        XCTAssertTrue(menuItem(app, id: "open-history", label: "Historial").exists)
+        XCTAssertTrue(menuItem(app, id: "new-conversation", label: "Nueva conversación").exists)
+    }
+
     func testOnboardingExplainsThenStarts() {
         let app = launch(skipOnboarding: false)
         let start = app.buttons["onboarding-start"]
@@ -47,7 +73,7 @@ final class ViernesUITests: XCTestCase {
 
     func testMainScreenControlsExistAndAreHittable() {
         let app = launch()
-        for id in ["mic", "toggle-keyboard", "toggle-speech", "open-settings", "open-memory", "open-history", "new-conversation"] {
+        for id in ["mic", "toggle-keyboard", "toggle-speech", "open-settings", "quick-more", "quick-today", "quick-tasks", "quick-weather"] {
             let button = app.buttons[id]
             XCTAssertTrue(button.waitForExistence(timeout: 5), "Falta el botón \(id)")
             XCTAssertTrue(button.isHittable, "\(id) no es pulsable")
@@ -114,7 +140,7 @@ final class ViernesUITests: XCTestCase {
 
     func testMemoryAddEditFlow() {
         let app = launch()
-        app.buttons["open-memory"].tap()
+        openMemory(app)
         let add = app.buttons["Añadir recuerdo"]
         XCTAssertTrue(add.waitForExistence(timeout: 5))
         add.tap()
@@ -128,7 +154,7 @@ final class ViernesUITests: XCTestCase {
 
     func testMemoryRefusesSensitiveText() {
         let app = launch()
-        app.buttons["open-memory"].tap()
+        openMemory(app)
         app.buttons["Añadir recuerdo"].tap()
         let text = field(app, "memory-text")
         XCTAssertTrue(text.waitForExistence(timeout: 3))

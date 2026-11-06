@@ -127,9 +127,28 @@ final class AppModel: ObservableObject {
         return report
     }
 
+    /// SOLO para las capturas del CI (`--uitest --uitest-demo-weather`): una conversación de EJEMPLO, marcada «Vista de prueba»,
+    /// para poder revisar el diseño de la tarjeta de clima. Nunca se usa fuera de las pruebas.
+    private static func qaWeatherConversation() -> [ChatMessage] {
+        let card = ToolCard(kind: .weather, fields: [
+            "place": "Bogotá (Cundinamarca, Colombia)", "city": "Bogotá", "temp": "16", "feels": "15",
+            "condition": "Parcialmente nublado", "symbol": "cloud.sun.fill", "humidity": "72", "wind": "8", "rain": "20",
+            "tmax": "20", "tmin": "12", "tomorrowMax": "19", "tomorrowMin": "11", "tomorrowRain": "40"
+        ])
+        let record = ActionRecord(tool: "get_weather", summary: "Clima en Bogotá", outcome: .executed("Datos de ejemplo de la vista de prueba."), card: card)
+        return [
+            ChatMessage(role: .user, text: "¿Cuál es el clima en Bogotá hoy?"),
+            ChatMessage(role: .assistant, text: "En Bogotá hoy se espera una temperatura entre 12 y 20 grados, con cielo parcialmente nublado y probabilidad de lluvia del 20 por ciento.",
+                        actions: [record], engineName: "Vista de prueba")
+        ]
+    }
+
     func bootstrap() async {
         guard !bootstrapped else { return }
         bootstrapped = true
+        if CommandLine.arguments.contains("--uitest"), CommandLine.arguments.contains("--uitest-demo-weather") {
+            messages = Self.qaWeatherConversation()
+        }
         // Los errores técnicos del motor van al registro local, nunca a la conversación.
         await conversation.setDiagnostics { Diagnostics.shared.log($0) }
         claude.config = settings.claude
