@@ -61,6 +61,8 @@ jobs:
     name: App iOS (${{ matrix.variant }})
     runs-on: ${{ inputs.runner || 'macos-26' }}
     needs: core
+    permissions:
+      contents: write          # solo para publicar el texto de los errores en la rama ci-errors-<variante> si algo falla
     strategy:
       fail-fast: false
       matrix:
@@ -133,6 +135,29 @@ jobs:
           grep -E "error:" build-${{ matrix.variant }}.log | sort -u | head -40 | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
           echo "### Pruebas fallidas (${{ matrix.variant }})" >> "$GITHUB_STEP_SUMMARY"
           grep -E "Test Case .* failed|error:" test-${{ matrix.variant }}.log 2>/dev/null | sort -u | head -40 | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+
+      # Los registros del CI solo se ven con sesión de GitHub. Si algo falla, los errores se publican en una rama pública
+      # (ci-errors-<variante>) para poder leerlos sin sesión. Solo texto de errores del compilador y de las pruebas.
+      - name: Publicar errores en la rama ci-errors (si falló)
+        if: failure()
+        run: |
+          mkdir -p /tmp/ci-errors
+          OUT=/tmp/ci-errors/errores.txt
+          echo "variante: ${{ matrix.variant }}  commit: ${GITHUB_SHA}" > "$OUT"
+          echo "=== errores de compilación" >> "$OUT"
+          grep -hE "error:|fatal error|Could not|cannot find|No such" build-${{ matrix.variant }}.log 2>/dev/null | cut -c1-400 | sort -u | head -60 >> "$OUT" || true
+          echo "=== pruebas fallidas" >> "$OUT"
+          grep -hE "Test Case .* failed|error:" test-${{ matrix.variant }}.log 2>/dev/null | cut -c1-400 | sort -u | head -60 >> "$OUT" || true
+          echo "=== últimas líneas de la compilación" >> "$OUT"
+          tail -40 build-${{ matrix.variant }}.log 2>/dev/null | cut -c1-300 >> "$OUT" || true
+          cd /tmp/ci-errors
+          git init -q
+          git checkout -q -b ci-errors-${{ matrix.variant }}
+          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Errores del CI para ${GITHUB_SHA}"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ci-errors-${{ matrix.variant }}
 
       - uses: actions/upload-artifact@v4
         if: always()

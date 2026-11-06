@@ -12,10 +12,10 @@ final class DeviceToolExecutor: ToolExecutor {
     private let mailDrafts: MailDraftCenter
     private let ledger: EventLedger
 
-    init(claude: ClaudeCoordinator, mailDrafts: MailDraftCenter = MailDraftCenter(), ledger: EventLedger = EventLedger()) {
+    init(claude: ClaudeCoordinator, mailDrafts: MailDraftCenter? = nil, ledger: EventLedger? = nil) {
         self.claude = claude
-        self.mailDrafts = mailDrafts
-        self.ledger = ledger
+        self.mailDrafts = mailDrafts ?? MailDraftCenter()
+        self.ledger = ledger ?? EventLedger()
     }
 
     /// Borra el registro local de eventos creados por Viernes (al borrar todos los datos).
