@@ -105,23 +105,46 @@ public enum ContactFormat {
 
 /// Rango de días para leer el calendario (puro y comprobable).
 public enum CalendarRange {
+    /// Desplazamiento en días respecto a hoy para las palabras relativas más comunes (español e inglés).
+    private static let relativeDays: [String: Int] = [
+        "today": 0, "hoy": 0, "tomorrow": 1, "manana": 1, "yesterday": -1, "ayer": -1,
+        "pasado manana": 2, "day after tomorrow": 2
+    ]
+    /// Día de la semana (1 = domingo, como `Calendar`) por nombre.
+    private static let weekdays: [String: Int] = [
+        "domingo": 1, "lunes": 2, "martes": 3, "miercoles": 4, "jueves": 5, "viernes": 6, "sabado": 7,
+        "sunday": 1, "monday": 2, "tuesday": 3, "wednesday": 4, "thursday": 5, "friday": 6, "saturday": 7
+    ]
+
+    private static func normalize(_ text: String) -> String {
+        TextNormalizer.fold(text).trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "el ", with: "").replacingOccurrences(of: "este ", with: "")
+    }
+
+    /// Acepta `today`/`tomorrow`, sus equivalentes en español («hoy», «mañana», «pasado mañana», «ayer»),
+    /// un día de la semana («viernes») o una fecha `YYYY-MM-DD`. Los modelos mezclan idiomas: se es tolerante.
     public static func isValidDateArgument(_ text: String) -> Bool {
-        let folded = text.lowercased()
-        if folded == "today" || folded == "tomorrow" { return true }
-        return DateParsing.parse(folded) != nil && folded.count == 10
+        let folded = normalize(text)
+        if relativeDays[folded] != nil || weekdays[folded] != nil { return true }
+        return folded.count == 10 && DateParsing.parse(folded) != nil
     }
 
     /// Inicio (00:00 local) y fin (exclusivo) del rango pedido.
     public static func resolve(date: String, days: Int, now: Date, calendar: Calendar = .current) -> (start: Date, end: Date)? {
-        let folded = date.lowercased()
+        let folded = normalize(date)
         let startOfToday = calendar.startOfDay(for: now)
         let start: Date
-        switch folded {
-        case "today": start = startOfToday
-        case "tomorrow":
-            guard let next = calendar.date(byAdding: .day, value: 1, to: startOfToday) else { return nil }
-            start = next
-        default:
+        if let offset = relativeDays[folded] {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: startOfToday) else { return nil }
+            start = day
+        } else if let weekday = weekdays[folded] {
+            // Próxima ocurrencia estrictamente posterior a hoy («el viernes» dicho un viernes es el siguiente).
+            let today = calendar.component(.weekday, from: startOfToday)
+            var ahead = (weekday - today + 7) % 7
+            if ahead == 0 { ahead = 7 }
+            guard let day = calendar.date(byAdding: .day, value: ahead, to: startOfToday) else { return nil }
+            start = day
+        } else {
             guard folded.count == 10, let parsed = DateParsing.parse(folded, timeZone: calendar.timeZone) else { return nil }
             start = calendar.startOfDay(for: parsed)
         }

@@ -42,7 +42,7 @@ final class CloudAndWeatherTests: XCTestCase {
     func testPersonaTellsTheModelToActWithoutAskingForTextConfirmation() {
         let prompt = Persona.systemPrompt(PersonaContext(engine: ModelCatalog.cloudDescriptor, claudeMode: .openApp))
         XCTAssertTrue(prompt.contains("DE INMEDIATO"))
-        XCTAssertTrue(prompt.contains("hoja de confirmación"))
+        XCTAssertTrue(prompt.contains("confirmación"))
     }
 
     func testErrorMessagesAreInSpanishAndNeverLeakSecrets() {

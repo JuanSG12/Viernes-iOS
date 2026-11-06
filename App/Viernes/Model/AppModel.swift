@@ -73,6 +73,8 @@ final class AppModel: ObservableObject {
     // MARK: Servicios
     let confirmation = ConfirmationCenter()
     private let claude = ClaudeCoordinator()
+    /// Ejecutor de herramientas del dispositivo (también lo usa la pantalla de Permisos para el diagnóstico del calendario).
+    private let tools: DeviceToolExecutor
     private let listener = SpeechListener()
     private let speaker = SpeechSpeaker()
     private let memoryStore: SwiftDataMemoryStore
@@ -107,6 +109,7 @@ final class AppModel: ObservableObject {
         memoryStore = SwiftDataMemoryStore(modelContainer: container)
         conversations = ConversationRepository(modelContainer: container)
         let executor = DeviceToolExecutor(claude: claude)
+        tools = executor
         conversation = ConversationEngine(engine: engine, memory: memoryStore, executor: executor, confirmer: confirmation,
                                           config: ConversationConfig(memoryPolicy: loaded.memory, claudeMode: loaded.claude.mode,
                                                                      calendarReadEnabled: loaded.calendarReadEnabled,
@@ -117,9 +120,18 @@ final class AppModel: ObservableObject {
 
     // MARK: Arranque
 
+    /// Pide acceso completo al calendario y devuelve un informe REAL de lo que iOS permite ver (pantalla de Permisos).
+    func diagnoseCalendar() async -> String {
+        let report = await tools.calendarDiagnosis()
+        permissionTick += 1
+        return report
+    }
+
     func bootstrap() async {
         guard !bootstrapped else { return }
         bootstrapped = true
+        // Los errores técnicos del motor van al registro local, nunca a la conversación.
+        await conversation.setDiagnostics { Diagnostics.shared.log($0) }
         claude.config = settings.claude
         speaker.apply(settings.voice)
         voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)

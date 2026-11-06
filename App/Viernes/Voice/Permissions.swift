@@ -1,6 +1,7 @@
 import AVFoundation
 import Speech
 import EventKit
+import Contacts
 import LocalAuthentication
 
 enum PermissionState: Equatable {
@@ -42,6 +43,16 @@ enum Permissions {
 
     static var reminders: PermissionState { map(EKEventStore.authorizationStatus(for: .reminder)) }
     static var calendar: PermissionState { map(EKEventStore.authorizationStatus(for: .event)) }
+
+    static var contacts: PermissionState {
+        switch CNContactStore.authorizationStatus(for: .contacts) {
+        case .authorized, .limited: return .granted
+        case .denied: return .denied
+        case .restricted: return .restricted
+        case .notDetermined: return .notDetermined
+        @unknown default: return .notDetermined
+        }
+    }
 
     private static func map(_ status: EKAuthorizationStatus) -> PermissionState {
         switch status {

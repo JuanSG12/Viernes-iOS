@@ -12,6 +12,18 @@ public enum ActionOutcome: Codable, Equatable, Sendable {
     public var isExecuted: Bool { if case .executed = self { return true } else { return false } }
 }
 
+/// Datos estructurados de un resultado para dibujar una tarjeta nativa (no una imagen). Todo son textos ya formateados.
+public struct ToolCard: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable { case weather }
+    public var kind: Kind
+    public var fields: [String: String]
+
+    public init(kind: Kind, fields: [String: String]) {
+        self.kind = kind
+        self.fields = fields
+    }
+}
+
 /// Registro verificable de lo que Viernes hizo realmente. La UI muestra ESTO, no lo que el modelo diga.
 public struct ActionRecord: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
@@ -19,13 +31,23 @@ public struct ActionRecord: Identifiable, Codable, Equatable, Sendable {
     public var summary: String
     public var outcome: ActionOutcome
     public var date: Date
+    /// Tarjeta nativa opcional (opcional para que el historial guardado antes de existir siga leyéndose).
+    public var card: ToolCard?
+    /// `false` para errores puramente técnicos que el modelo puede corregir solo (llamada mal formada, argumentos inválidos):
+    /// quedan en los diagnósticos y no se enseñan al usuario. `nil` = visible.
+    public var showToUser: Bool?
 
-    public init(id: UUID = UUID(), tool: String, summary: String, outcome: ActionOutcome, date: Date = Date()) {
+    public var isVisible: Bool { showToUser != false }
+
+    public init(id: UUID = UUID(), tool: String, summary: String, outcome: ActionOutcome, date: Date = Date(),
+                card: ToolCard? = nil, showToUser: Bool? = nil) {
         self.id = id
         self.tool = tool
         self.summary = summary
         self.outcome = outcome
         self.date = date
+        self.card = card
+        self.showToUser = showToUser
     }
 }
 

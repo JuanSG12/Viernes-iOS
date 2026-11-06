@@ -60,7 +60,7 @@ struct ConversationView: View {
                     if !model.liveTranscript.isEmpty {
                         UserBubble(text: model.liveTranscript, dim: true).id("live")
                     }
-                    ForEach(model.liveActions) { ActionCard(record: $0) }
+                    ForEach(model.liveActions.filter { $0.isVisible }) { ActionCard(record: $0) }
                     if !model.streamingText.isEmpty {
                         StreamingMessage(text: model.streamingText).id("stream")
                     } else if model.coreState == .thinking {
@@ -126,7 +126,7 @@ struct AssistantMessage: View {
                     .foregroundStyle(Theme.textPrimary)
                     .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
-                ForEach(message.actions) { ActionCard(record: $0) }
+                ForEach(message.actions.filter { $0.isVisible }) { ActionCard(record: $0) }
                 if isLast && !isSystemNotice { actionRow }
             }
         }
@@ -196,11 +196,27 @@ struct ThinkingIndicator: View {
     }
 }
 
-/// Tarjeta de lo que REALMENTE pasó con una herramienta (ejecutada / rechazada / falló).
+/// Lo que REALMENTE pasó con una herramienta. Resultado con datos estructurados → tarjeta nativa; resultado simple → tarjeta
+/// compacta; error técnico que el modelo puede corregir solo → no se muestra (queda en diagnósticos).
 struct ActionCard: View {
     let record: ActionRecord
 
     var body: some View {
+        if !record.isVisible {
+            EmptyView()
+        } else if record.outcome.isExecuted, let card = record.card, card.kind == .weather {
+            WeatherCard(card: card)
+        } else {
+            standardCard
+        }
+    }
+
+    private var needsSettings: Bool {
+        if case .failed(let reason) = record.outcome { return reason.contains("Ajustes ›") }
+        return false
+    }
+
+    private var standardCard: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: ToolPhrases.icon(record.tool))
                 .font(.system(size: 13, weight: .medium))
@@ -214,7 +230,15 @@ struct ActionCard: View {
                     Text(record.summary).font(Theme.body(13, weight: .medium)).foregroundStyle(Theme.textPrimary).lineLimit(3)
                 }
                 if let detail = detail {
-                    Text(detail).font(Theme.body(12)).foregroundStyle(Theme.textSecondary).lineLimit(5)
+                    Text(detail).font(Theme.body(12)).foregroundStyle(Theme.textSecondary).lineLimit(6)
+                }
+                if needsSettings {
+                    Button("Abrir Ajustes") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                    .buttonStyle(ChromeButtonStyle(tint: Theme.accent))
+                    .padding(.top, 4)
+                    .accessibilityIdentifier("open-ios-settings")
                 }
             }
             Spacer(minLength: 0)

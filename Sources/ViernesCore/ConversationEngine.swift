@@ -51,6 +51,11 @@ public actor ConversationEngine {
     public private(set) var config: ConversationConfig
     private var history: [ChatMessage] = []
     private let maxStoredMessages = 60
+    /// Destino de los diagnósticos técnicos (la app los guarda en un registro local). Nunca se muestran en la conversación.
+    private var diagnosticsSink: (@Sendable (String) -> Void)?
+
+    public func setDiagnostics(_ sink: @escaping @Sendable (String) -> Void) { diagnosticsSink = sink }
+    private func diagnose(_ message: String) { diagnosticsSink?(message) }
 
     public init(engine: LanguageModelEngine, memory: MemoryStore, executor: ToolExecutor?,
                 confirmer: ConfirmationProvider?, config: ConversationConfig = ConversationConfig(),
@@ -100,7 +105,7 @@ public actor ConversationEngine {
             let record = await handleMemoryCommand(command)
             actions.append(record)
             out.yield(.action(record))
-            firstUserSuffix = "\n\n" + Persona.resultMarker + "\n" + Self.describe(record)
+            firstUserSuffix = "\n\n" + Persona.wrapResults([Self.describe(record)])
         }
 
         // 2) Contexto de memoria local para este mensaje.
@@ -122,15 +127,17 @@ public actor ConversationEngine {
             if Task.isCancelled { return }
             let filter = StreamingTagFilter(specs: [
                 .init(open: Persona.toolOpen, close: Persona.toolClose, capture: true),
-                .init(open: "<think>", close: "</think>", capture: false)
+                .init(open: "<think>", close: "</think>", capture: false),
+                .init(open: Persona.resultOpen, close: Persona.resultClose, capture: false)
             ])
+            let leakGuard = LeakGuard()
             var roundVisible = ""
 
             do {
                 let request = GenerationRequest(system: system, turns: turns)
                 for try await delta in engine.generate(request) {
                     if Task.isCancelled { return }
-                    var piece = filter.feed(delta)
+                    var piece = leakGuard.feed(filter.feed(delta))
                     if roundVisible.isEmpty { piece = String(piece.drop(while: { $0.isWhitespace })) }
                     if !piece.isEmpty {
                         if roundVisible.isEmpty, !displayText.isEmpty { out.yield(.delta("\n\n")); displayText += "\n\n" }
@@ -139,12 +146,13 @@ public actor ConversationEngine {
                         out.yield(.delta(piece))
                     }
                 }
-                var tail = filter.finish()
+                var tail = leakGuard.feed(filter.finish()) + leakGuard.finish()
                 if roundVisible.isEmpty { tail = String(tail.drop(while: { $0.isWhitespace })) }
                 if !tail.isEmpty { roundVisible += tail; displayText += tail; out.yield(.delta(tail)) }
             } catch is CancellationError {
                 return
             } catch {
+                diagnose("motor: \(error.localizedDescription)")
                 out.yield(.failed(error.localizedDescription))
                 return
             }
@@ -156,8 +164,9 @@ public actor ConversationEngine {
             var records: [ActionRecord] = await executeRound(executedBlocks, out)
             if Task.isCancelled { return }
             if toolBlocks.isEmpty && filter.unterminatedBlocks > 0 && roundVisible.isEmpty {
+                diagnose("respuesta del modelo truncada dentro de una llamada de herramienta")
                 records.append(ActionRecord(tool: "desconocida", summary: "Respuesta truncada",
-                                            outcome: .failed("La respuesta del modelo se cortó."), date: clock()))
+                                            outcome: .failed("La respuesta del modelo se cortó."), date: clock(), showToUser: false))
             }
             for record in records { out.yield(.action(record)) }
             actions.append(contentsOf: records)
@@ -168,7 +177,7 @@ public actor ConversationEngine {
             let rawAssistant = ([roundVisible] + executedBlocks.map { "\(Persona.toolOpen)\($0.content)\(Persona.toolClose)" })
                 .filter { !$0.isEmpty }.joined(separator: "\n")
             turns.append(ChatTurn(role: .assistant, content: rawAssistant))
-            turns.append(ChatTurn(role: .user, content: Persona.resultMarker + "\n" + records.map(Self.describe).joined(separator: "\n")))
+            turns.append(ChatTurn(role: .user, content: Persona.wrapResults(records.map(Self.describe))))
         }
 
         let finalText = displayText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -205,8 +214,9 @@ public actor ConversationEngine {
             if let call = ToolCallParser.parse(block.content) {
                 parsed.append((index, call))
             } else {
+                diagnose("llamada de herramienta malformada: \(String(block.content.prefix(120)))")
                 slots[index] = ActionRecord(tool: "desconocida", summary: "Llamada de herramienta malformada",
-                                            outcome: .failed("El formato de la llamada no era válido."), date: clock())
+                                            outcome: .failed("El formato de la llamada no era válido."), date: clock(), showToUser: false)
             }
         }
 
@@ -255,16 +265,25 @@ public actor ConversationEngine {
         do {
             validated = try ToolValidator.validate(call, timeZone: config.timeZone)
         } catch {
-            return ActionRecord(tool: call.name, summary: call.name, outcome: .failed(error.localizedDescription), date: clock())
+            // Error técnico que el modelo puede corregir solo: queda en diagnósticos y no se enseña al usuario.
+            diagnose("validación de \(call.name): \(error.localizedDescription)")
+            return ActionRecord(tool: call.name, summary: call.name, outcome: .failed(error.localizedDescription), date: clock(), showToUser: false)
         }
         guard availableTools().contains(where: { $0.name == validated.name }) else {
-            return ActionRecord(tool: validated.name, summary: validated.name,
-                                outcome: .failed("Esa herramienta no está disponible o está desactivada."), date: clock())
+            diagnose("herramienta no disponible: \(validated.name)")
+            let reason: String
+            switch validated.name {
+            case "list_events": reason = "El usuario no ha activado la lectura del calendario. Dile que puede activarla en Configuración › Privacidad › «Permitir que Viernes lea mi calendario»."
+            case "find_contact": reason = "El usuario no ha activado la lectura de contactos. Dile que puede activarla en Configuración › Privacidad › «Permitir que Viernes lea mis contactos»."
+            case "ask_claude": reason = "La integración con Claude está desactivada. Dile que puede activarla en Configuración › Claude."
+            default: reason = "Esa herramienta no está disponible o está desactivada."
+            }
+            return ActionRecord(tool: validated.name, summary: validated.name, outcome: .failed(reason), date: clock(), showToUser: false)
         }
         let definition = ToolCatalog.definition(named: validated.name)!
         let summary = Self.summary(for: validated)
 
-        if definition.risk == .sensitive {
+        if definition.risk.requiresConfirmation {
             guard let confirmer = confirmer else {
                 return ActionRecord(tool: validated.name, summary: summary, outcome: .failed("No hay forma de pedir confirmación."), date: clock())
             }
@@ -284,8 +303,13 @@ public actor ConversationEngine {
             outcome = .failure("Herramienta no disponible.")
         }
         switch outcome {
-        case .success(let text): return ActionRecord(tool: validated.name, summary: summary, outcome: .executed(text), date: clock())
-        case .failure(let reason): return ActionRecord(tool: validated.name, summary: summary, outcome: .failed(reason), date: clock())
+        case .success(let text):
+            return ActionRecord(tool: validated.name, summary: summary, outcome: .executed(text), date: clock())
+        case .card(let text, let card):
+            return ActionRecord(tool: validated.name, summary: summary, outcome: .executed(text), date: clock(), card: card)
+        case .failure(let reason):
+            diagnose("fallo de \(validated.name): \(String(reason.prefix(200)))")
+            return ActionRecord(tool: validated.name, summary: summary, outcome: .failed(reason), date: clock())
         }
     }
 
@@ -339,8 +363,10 @@ public actor ConversationEngine {
         case .forget(let query):
             let outcome = await forget(query: query, alreadyConfirmed: false)
             switch outcome {
-            case .success(let text): return ActionRecord(tool: "forget_memory", summary: "Olvidar: \(query)", outcome: .executed(text), date: clock())
-            case .failure(let reason): return ActionRecord(tool: "forget_memory", summary: "Olvidar: \(query)", outcome: .failed(reason), date: clock())
+            case .success(let text), .card(let text, _):
+                return ActionRecord(tool: "forget_memory", summary: "Olvidar: \(query)", outcome: .executed(text), date: clock())
+            case .failure(let reason):
+                return ActionRecord(tool: "forget_memory", summary: "Olvidar: \(query)", outcome: .failed(reason), date: clock())
             }
         }
     }

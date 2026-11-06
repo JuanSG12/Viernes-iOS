@@ -2,7 +2,9 @@ import XCTest
 @testable import ViernesCore
 
 final class ConversationEngineTests: XCTestCase {
-    private let reminderCall = #"<tool>{"name":"create_reminder","args":{"title":"Llamar a Ana","due":"2026-11-05T09:00"}}</tool>"#
+    /// Herramienta EXTERNA (pide confirmación). Los recordatorios son reversibles y se ejecutan directos.
+    private let reminderCall = #"<tool>{"name":"run_shortcut","args":{"name":"Buenos días"}}</tool>"#
+    private let directReminderCall = #"<tool>{"name":"create_reminder","args":{"title":"Llevar los documentos","due":"2026-11-06T08:00"}}</tool>"#
 
     private func makeEngine(
         script: [[String]], executor: ToolExecutor? = RecordingExecutor(), confirmer: ConfirmationProvider? = RecordingConfirmer(approve: true),
@@ -37,8 +39,8 @@ final class ConversationEngineTests: XCTestCase {
         let events = await collect(await engine.send("Recuérdame llamar a Ana mañana a las 9"))
 
         XCTAssertEqual(confirmer.requests.count, 1)
-        XCTAssertEqual(confirmer.requests.first?.tool, "create_reminder")
-        XCTAssertEqual(executor.calls.map(\.name), ["create_reminder"])
+        XCTAssertEqual(confirmer.requests.first?.tool, "run_shortcut")
+        XCTAssertEqual(executor.calls.map(\.name), ["run_shortcut"])
         XCTAssertEqual(events.completedMessage?.actions.first?.outcome, .executed("Recordatorio creado"))
         XCTAssertEqual(events.completedMessage?.text, "Listo, quedó creado.")
 
@@ -50,6 +52,36 @@ final class ConversationEngineTests: XCTestCase {
         // Y alternancia estricta user/assistant.
         let roles = scripted.requests[1].turns.map(\.role)
         for pair in zip(roles, roles.dropFirst()) { XCTAssertNotEqual(pair.0, pair.1) }
+    }
+
+    /// Política: lo que el usuario pidió claramente y es reversible se ejecuta SIN preguntar.
+    func testClearReversibleRequestRunsWithoutAskingAndConsultsRunDirectly() async {
+        let executor = RecordingExecutor()
+        executor.outcome = .success("Recordatorio creado")
+        let confirmer = RecordingConfirmer(approve: true)
+        let (engine, _) = makeEngine(script: [[directReminderCall], ["Listo, mañana a las 8."]], executor: executor, confirmer: confirmer)
+        let events = await collect(await engine.send("Recuérdame llevar los documentos mañana a las 8"))
+        XCTAssertTrue(confirmer.requests.isEmpty, "Un recordatorio claro no necesita confirmación")
+        XCTAssertEqual(executor.calls.map(\.name), ["create_reminder"])
+        XCTAssertEqual(events.completedMessage?.actions.first?.outcome, .executed("Recordatorio creado"))
+
+        let weather = #"<tool>{"name":"get_weather","args":{"city":"Bogotá"}}</tool>"#
+        let (engine2, _) = makeEngine(script: [[weather], ["Hace frío."]], executor: executor, confirmer: confirmer)
+        _ = await collect(await engine2.send("Consulta el clima de Bogotá"))
+        XCTAssertTrue(confirmer.requests.isEmpty, "Una consulta se ejecuta directa")
+    }
+
+    func testDestructiveAndExternalActionsStillNeedConfirmation() async {
+        for (name, risk) in [("forget_memory", ToolRisk.destructive), ("open_url", .external), ("run_shortcut", .external), ("ask_claude", .external), ("save_memory", .sensitive)] {
+            XCTAssertEqual(ToolCatalog.definition(named: name)?.risk, risk, name)
+            XCTAssertTrue(ToolCatalog.definition(named: name)?.risk.requiresConfirmation ?? false, name)
+        }
+        for name in ["get_weather", "list_events", "find_contact", "list_reminders", "device_info", "search_memory", "open_app"] {
+            XCTAssertEqual(ToolCatalog.definition(named: name)?.risk, .safe, name)
+        }
+        for name in ["create_reminder", "complete_reminder", "create_event", "compose_email", "compose_message", "call_phone"] {
+            XCTAssertEqual(ToolCatalog.definition(named: name)?.risk, .reversible, name)
+        }
     }
 
     func testDeclinedConfirmationDoesNotExecute() async {

@@ -56,19 +56,45 @@ final class AgentAndToolsTests: XCTestCase {
         XCTAssertEqual(calendar.component(.hour, from: tomorrow.start), 0)
         let week = try XCTUnwrap(CalendarRange.resolve(date: "2026-11-10", days: 99, now: now, calendar: calendar))
         XCTAssertEqual(calendar.dateComponents([.day], from: week.start, to: week.end).day, 7, "Máximo 7 días")
-        XCTAssertNil(CalendarRange.resolve(date: "pasado mañana", days: 1, now: now, calendar: calendar))
+        XCTAssertNil(CalendarRange.resolve(date: "dentro de un rato", days: 1, now: now, calendar: calendar))
         XCTAssertTrue(CalendarRange.isValidDateArgument("TODAY"))
         XCTAssertFalse(CalendarRange.isValidDateArgument("2026-11-10T09:00"), "Solo fecha, sin hora")
     }
 
+    /// Los modelos mezclan idiomas: «mañana» llegaba como fecha inválida y el usuario veía un error técnico.
+    func testCalendarRangeAcceptsSpanishRelativeDatesAndWeekdays() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Bogota")!
+        let now = try XCTUnwrap(DateParsing.parse("2026-11-05T15:30", timeZone: calendar.timeZone))   // jueves
+        func day(_ text: String) throws -> Int {
+            let range = try XCTUnwrap(CalendarRange.resolve(date: text, days: 1, now: now, calendar: calendar), text)
+            return calendar.component(.day, from: range.start)
+        }
+        XCTAssertEqual(try day("hoy"), 5)
+        XCTAssertEqual(try day("mañana"), 6)
+        XCTAssertEqual(try day("Mañana"), 6)
+        XCTAssertEqual(try day("pasado mañana"), 7)
+        XCTAssertEqual(try day("ayer"), 4)
+        XCTAssertEqual(try day("el viernes"), 6, "El próximo viernes")
+        XCTAssertEqual(try day("jueves"), 12, "Dicho un jueves, «jueves» es el siguiente")
+        XCTAssertEqual(try day("domingo"), 8)
+        for text in ["mañana", "hoy", "viernes", "pasado mañana", "tomorrow", "2026-11-10"] {
+            XCTAssertTrue(CalendarRange.isValidDateArgument(text), text)
+        }
+        XCTAssertNoThrow(try ToolValidator.validate(ToolCall(name: "list_events", args: ["date": "mañana"])))
+    }
+
     // MARK: Validación
 
-    func testNewToolsAreValidatedAndAllSensitive() throws {
-        for name in ["list_events", "find_contact", "compose_email", "compose_message", "call_phone"] {
-            XCTAssertEqual(ToolCatalog.definition(named: name)?.risk, .sensitive, "\(name) debe pedir confirmación")
+    func testNewToolsAreValidatedAndClassifiedByRisk() throws {
+        for name in ["list_events", "find_contact"] {
+            XCTAssertEqual(ToolCatalog.definition(named: name)?.risk, .safe, "\(name) es una consulta: el permiso se da en Privacidad")
+        }
+        for name in ["compose_email", "compose_message", "call_phone"] {
+            XCTAssertEqual(ToolCatalog.definition(named: name)?.risk, .reversible, "\(name) solo prepara un borrador o abre el marcador")
         }
         XCTAssertNoThrow(try ToolValidator.validate(ToolCall(name: "list_events", args: ["date": "tomorrow", "days": "2"])))
-        XCTAssertThrowsError(try ToolValidator.validate(ToolCall(name: "list_events", args: ["date": "ayer"])))
+        XCTAssertThrowsError(try ToolValidator.validate(ToolCall(name: "list_events", args: ["date": "cuando quieras"])))
         XCTAssertThrowsError(try ToolValidator.validate(ToolCall(name: "list_events", args: ["date": "today", "days": "30"])))
         XCTAssertNoThrow(try ToolValidator.validate(ToolCall(name: "compose_email", args: ["body": "Hola", "to": "ana@example.com", "subject": "Reunión"])))
         XCTAssertThrowsError(try ToolValidator.validate(ToolCall(name: "compose_email", args: ["body": "Hola", "to": "no-es-correo"])))
@@ -154,8 +180,8 @@ final class AgentAndToolsTests: XCTestCase {
         if case .failed? = events3.actionRecords.first?.outcome {} else { XCTFail("Debe reportar el fallo real") }
     }
 
-    func testSensitiveToolsAreNeverRetried() async {
-        let reminder = #"<tool>{"name":"create_reminder","args":{"title":"Salir temprano"}}</tool>"#
+    func testToolsThatNeedConfirmationAreNeverRetried() async {
+        let reminder = #"<tool>{"name":"run_shortcut","args":{"name":"Salir temprano"}}</tool>"#
         let flaky = FlakyExecutor(failures: 5, message: "Sin conexión a internet")
         let confirmer = RecordingConfirmer(approve: true)
         let (engine, _) = makeEngine(script: [[reminder], ["No se pudo."]], executor: flaky, confirmer: confirmer)
@@ -172,7 +198,7 @@ final class AgentAndToolsTests: XCTestCase {
     }
 
     /// El ejemplo pedido: leer la agenda de mañana y, con datos reales, proponer un recordatorio que el usuario confirma.
-    func testReadCalendarThenCreateReminderChainsWithRealResultsAndTwoConfirmations() async {
+    func testReadCalendarThenCreateReminderChainsWithRealResultsAndNoNeedlessQuestions() async {
         let read = #"<tool>{"name":"list_events","args":{"date":"tomorrow"}}</tool>"#
         let remind = #"<tool>{"name":"create_reminder","args":{"title":"Salir para la reunión de las 9","due":"2026-11-06T08:15"}}</tool>"#
         let executor = RecordingExecutor()
@@ -183,21 +209,95 @@ final class AgentAndToolsTests: XCTestCase {
         let events = await collect(await engine.send("Revisa mi agenda de mañana y recuérdame salir con tiempo"))
 
         XCTAssertEqual(executor.calls.map(\.name), ["list_events", "create_reminder"], "Primero consulta, luego actúa")
-        XCTAssertEqual(confirmer.requests.map(\.tool), ["list_events", "create_reminder"], "Cada acción sensible pide su confirmación")
+        XCTAssertTrue(confirmer.requests.isEmpty, "Consultar la agenda (con permiso) y crear un recordatorio claro no piden confirmación")
         XCTAssertEqual(scripted.requests.count, 3)
         XCTAssertTrue((scripted.requests[1].turns.last?.content ?? "").contains("Reunión con Ana"), "El modelo ve el resultado REAL antes de actuar")
         XCTAssertEqual(events.completedMessage?.text, "Listo: te avisaré a las 8:15.")
         XCTAssertEqual(events.completedMessage?.actions.count, 2)
     }
 
-    func testDecliningTheCalendarReadStopsTheChain() async {
-        let read = #"<tool>{"name":"list_events","args":{"date":"today"}}</tool>"#
+    func testDecliningAnExternalActionStopsIt() async {
+        let shortcut = #"<tool>{"name":"run_shortcut","args":{"name":"Enviar ubicación"}}</tool>"#
         let executor = RecordingExecutor()
-        let (engine, scripted) = makeEngine(script: [[read], ["De acuerdo, no leo tu calendario."]], executor: executor,
-                                            confirmer: RecordingConfirmer(approve: false), config: ConversationConfig(calendarReadEnabled: true))
-        let events = await collect(await engine.send("¿Qué tengo hoy?"))
-        XCTAssertTrue(executor.calls.isEmpty, "Sin confirmación no se lee nada")
+        let (engine, scripted) = makeEngine(script: [[shortcut], ["De acuerdo, no lo ejecuto."]], executor: executor,
+                                            confirmer: RecordingConfirmer(approve: false))
+        let events = await collect(await engine.send("Ejecuta mi atajo Enviar ubicación"))
+        XCTAssertTrue(executor.calls.isEmpty, "Sin confirmación no se ejecuta")
         XCTAssertEqual(events.completedMessage?.actions.first?.outcome, .declined)
         XCTAssertTrue((scripted.requests[1].turns.last?.content ?? "").contains("RECHAZADA"))
+    }
+
+    // MARK: Resultados internos y errores técnicos
+
+    func testValidationFailuresAreHiddenFromTheUserButVisibleToTheModel() async {
+        let bad = #"<tool>{"name":"list_events","args":{"date":"cuando quieras"}}</tool>"#
+        let executor = RecordingExecutor()
+        let (engine, scripted) = makeEngine(script: [[bad], ["¿De qué día quieres ver la agenda?"]], executor: executor,
+                                            config: ConversationConfig(calendarReadEnabled: true))
+        let events = await collect(await engine.send("Mira mi agenda"))
+        XCTAssertTrue(executor.calls.isEmpty)
+        let record = try? XCTUnwrap(events.actionRecords.first)
+        XCTAssertEqual(record?.isVisible, false, "Un error de validación no se enseña al usuario")
+        XCTAssertTrue((scripted.requests[1].turns.last?.content ?? "").contains("FALLÓ"), "El modelo sí lo ve para corregir")
+        XCTAssertEqual(events.completedMessage?.text, "¿De qué día quieres ver la agenda?")
+    }
+
+    func testRealExecutionFailuresStayVisible() async {
+        let weather = #"<tool>{"name":"get_weather","args":{"city":"Xyz"}}</tool>"#
+        let executor = RecordingExecutor()
+        executor.outcome = .failure("No encontré una ciudad llamada «Xyz».")
+        let (engine, _) = makeEngine(script: [[weather], ["No encontré esa ciudad."]], executor: executor)
+        let events = await collect(await engine.send("Clima de Xyz"))
+        XCTAssertEqual(events.actionRecords.first?.isVisible, true)
+    }
+
+    func testDisabledReadToolTellsTheModelHowToEnableItAndShowsNothingTechnical() async {
+        let read = #"<tool>{"name":"list_events","args":{"date":"mañana"}}</tool>"#
+        let (engine, scripted) = makeEngine(script: [[read], ["Activa la lectura del calendario en Privacidad."]], executor: RecordingExecutor())
+        let events = await collect(await engine.send("¿Qué tengo mañana?"))
+        XCTAssertEqual(events.actionRecords.first?.isVisible, false)
+        XCTAssertTrue((scripted.requests[1].turns.last?.content ?? "").contains("Privacidad"))
+    }
+
+    func testEngineSendsDiagnosticsInsteadOfShowingTechnicalErrors() async {
+        final class Sink: @unchecked Sendable {
+            private let lock = NSLock()
+            private var items: [String] = []
+            func add(_ text: String) { lock.withLock { items.append(text) } }
+            var all: [String] { lock.withLock { items } }
+        }
+        let sink = Sink()
+        let bad = #"<tool>{"name":"get_weather","args":{}}</tool>"#
+        let (engine, _) = makeEngine(script: [[bad], ["¿De qué ciudad?"]], executor: RecordingExecutor())
+        await engine.setDiagnostics { sink.add($0) }
+        _ = await collect(await engine.send("Clima"))
+        XCTAssertTrue(sink.all.contains { $0.contains("validación de get_weather") }, "El detalle técnico va a diagnósticos: \(sink.all)")
+    }
+
+    func testToolResultEnvelopeIsInternalAndEchoesNeverReachTheConversation() async {
+        let wrapped = Persona.wrapResults(["- get_weather: ÉXITO. Hay 18 grados."])
+        XCTAssertTrue(wrapped.hasPrefix(Persona.resultOpen))
+        XCTAssertTrue(wrapped.contains(Persona.resultClose))
+        XCTAssertTrue(wrapped.contains("no lo copies"))
+
+        // El modelo repite el sobre y una línea de resultado: nada de eso debe llegar al usuario.
+        let echo = "<tool_result>\n- get_weather: ÉXITO. Hay 18 grados.\n</tool_result>\nEn Bogotá hay 18 grados."
+        let weather = #"<tool>{"name":"get_weather","args":{"city":"Bogotá"}}</tool>"#
+        let (engine, _) = makeEngine(script: [[weather], [echo]], executor: RecordingExecutor())
+        let events = await collect(await engine.send("¿Qué clima hace en Bogotá?"))
+        let text = events.completedMessage?.text ?? ""
+        XCTAssertEqual(text, "En Bogotá hay 18 grados.")
+        for leak in ["tool_result", "RESULTADO", "get_weather", "ÉXITO", "{\"name\""] {
+            XCTAssertFalse(text.contains(leak), leak)
+        }
+        let deltas = events.compactMap { event -> String? in if case .delta(let piece) = event { return piece } else { return nil } }.joined()
+        XCTAssertFalse(deltas.contains("ÉXITO"), "Tampoco durante el streaming (voz): \(deltas)")
+    }
+
+    func testLegacyBracketMarkerEchoIsRemovedEvenWhenSplitAcrossChunks() async {
+        let chunks = ["[RESULTADO_", "HERRAMIENTA]\n- list_events: ÉXITO. No hay eventos", " en ese rango.\n\nMañana no tienes eventos."]
+        let (engine, _) = makeEngine(script: [chunks], executor: RecordingExecutor())
+        let events = await collect(await engine.send("¿Qué tengo mañana?"))
+        XCTAssertEqual(events.completedMessage?.text, "Mañana no tienes eventos.")
     }
 }

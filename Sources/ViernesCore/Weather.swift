@@ -79,6 +79,76 @@ public enum WeatherService {
         return parts.joined(separator: " ")
     }
 
+    /// Datos para la tarjeta de clima (todo textos ya formateados). Solo contiene lo que Open-Meteo devolvió:
+    /// si un dato falta, su campo no existe y la tarjeta no lo muestra.
+    public static func card(place: GeoPlace, forecast data: Data) -> ToolCard? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let current = object["current"] as? [String: Any],
+              let temperature = number(current["temperature_2m"]) else { return nil }
+        var fields: [String: String] = ["place": place.label, "city": place.name, "temp": String(rounded(temperature))]
+        if let feels = number(current["apparent_temperature"]) { fields["feels"] = String(rounded(feels)) }
+        if let code = number(current["weather_code"]) {
+            fields["code"] = String(Int(code))
+            fields["condition"] = conditionTitle(code: Int(code))
+            fields["symbol"] = symbolName(code: Int(code))
+        }
+        if let humidity = number(current["relative_humidity_2m"]) { fields["humidity"] = String(rounded(humidity)) }
+        if let wind = number(current["wind_speed_10m"]) { fields["wind"] = String(rounded(wind)) }
+        if let daily = object["daily"] as? [String: Any] {
+            let maxima = (daily["temperature_2m_max"] as? [Any])?.compactMap(number) ?? []
+            let minima = (daily["temperature_2m_min"] as? [Any])?.compactMap(number) ?? []
+            let rain = (daily["precipitation_probability_max"] as? [Any])?.compactMap(number) ?? []
+            if let value = maxima.first { fields["tmax"] = String(rounded(value)) }
+            if let value = minima.first { fields["tmin"] = String(rounded(value)) }
+            if let value = rain.first { fields["rain"] = String(rounded(value)) }
+            if maxima.count > 1 { fields["tomorrowMax"] = String(rounded(maxima[1])) }
+            if minima.count > 1 { fields["tomorrowMin"] = String(rounded(minima[1])) }
+            if rain.count > 1 { fields["tomorrowRain"] = String(rounded(rain[1])) }
+        }
+        return ToolCard(kind: .weather, fields: fields)
+    }
+
+    /// Título corto de la condición para la tarjeta.
+    public static func conditionTitle(code: Int) -> String {
+        switch code {
+        case 0: return "Despejado"
+        case 1: return "Mayormente despejado"
+        case 2: return "Parcialmente nublado"
+        case 3: return "Nublado"
+        case 45, 48: return "Niebla"
+        case 51, 53, 55: return "Llovizna"
+        case 56, 57: return "Llovizna helada"
+        case 61: return "Lluvia ligera"
+        case 63: return "Lluvia moderada"
+        case 65: return "Lluvia fuerte"
+        case 66, 67: return "Lluvia helada"
+        case 71, 73, 75, 77: return "Nieve"
+        case 80, 81: return "Chubascos"
+        case 82: return "Chubascos fuertes"
+        case 85, 86: return "Chubascos de nieve"
+        case 95: return "Tormenta eléctrica"
+        case 96, 99: return "Tormenta con granizo"
+        default: return "Condiciones variables"
+        }
+    }
+
+    /// Nombre de símbolo SF para la condición (la UI lo dibuja con símbolos del sistema, no con imágenes).
+    public static func symbolName(code: Int) -> String {
+        switch code {
+        case 0: return "sun.max.fill"
+        case 1: return "sun.max"
+        case 2: return "cloud.sun.fill"
+        case 3: return "cloud.fill"
+        case 45, 48: return "cloud.fog.fill"
+        case 51, 53, 55, 56, 57: return "cloud.drizzle.fill"
+        case 61, 63, 65, 66, 67: return "cloud.rain.fill"
+        case 71, 73, 75, 77, 85, 86: return "cloud.snow.fill"
+        case 80, 81, 82: return "cloud.heavyrain.fill"
+        case 95, 96, 99: return "cloud.bolt.rain.fill"
+        default: return "cloud.fill"
+        }
+    }
+
     /// Códigos WMO que usa Open-Meteo.
     static func describe(code: Int) -> String {
         switch code {

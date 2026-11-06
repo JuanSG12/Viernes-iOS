@@ -36,7 +36,7 @@ struct PrivacyView: View {
                     get: { model.settings.contactsReadEnabled }, set: { model.settings.contactsRead = $0 }))
                     .accessibilityIdentifier("contacts-read")
             } header: { Text("Datos de tu iPhone") } footer: {
-                Text("Apagado por defecto. Por defecto Viernes solo puede AÑADIR eventos. Si lo activas, podrá leer eventos o buscar contactos cuando se lo pidas y cada lectura te pedirá confirmación. Lo que lea se entrega al cerebro activo: con el cerebro en la nube, también sale del teléfono.")
+                Text("Apagado por defecto. Por defecto Viernes solo puede AÑADIR eventos. Si lo activas, podrá leer tu agenda o buscar contactos cuando se lo pidas, sin preguntarte cada vez: este interruptor es tu autorización (iOS además pide su propio permiso la primera vez). Lo que lea se entrega al cerebro activo: con el cerebro en la nube, también sale del teléfono. Si no quieres eso, déjalo apagado.")
             }
             .listRowBackground(Theme.carbon.opacity(0.5))
 

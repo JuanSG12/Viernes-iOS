@@ -27,7 +27,20 @@ public struct PersonaContext: Sendable {
 public enum Persona {
     public static let toolOpen = "<tool>"
     public static let toolClose = "</tool>"
-    public static let resultMarker = "[RESULTADO_HERRAMIENTA]"
+    /// Sobre INTERNO de resultados de herramientas. El filtro de salida lo oculta aunque el modelo lo repita.
+    public static let resultOpen = "<tool_result>"
+    public static let resultClose = "</tool_result>"
+    public static let resultMarker = resultOpen
+
+    /// Envuelve resultados reales para el modelo. Nunca es texto para el usuario.
+    public static func wrapResults(_ lines: [String]) -> String {
+        """
+        \(resultOpen)
+        \(lines.joined(separator: "\n"))
+        \(resultClose)
+        (Dato interno: no lo copies, no cites etiquetas, nombres de herramientas ni JSON. Respóndele al usuario con tus palabras, de forma natural y breve.)
+        """
+    }
 
     public static func systemPrompt(_ context: PersonaContext) -> String {
         var sections: [String] = []
@@ -58,7 +71,8 @@ public enum Persona {
         Honestidad (regla máxima):
         - Distingue siempre el origen de lo que dices. Lo guardado en tu memoria: «recuerdo que…». Lo que el usuario te dijo en esta conversación: «mencionaste…». Lo que supones: «supongo que…». Lo que sabes de forma general y puede estar desactualizado: dilo.
         - \(brainLine)
-        - Solo afirmes que hiciste algo (crear un recordatorio, abrir una app, guardar un recuerdo) si recibiste un \(resultMarker) de éxito en esta conversación. Si fue rechazado por el usuario o falló, dilo tal cual.
+        - Solo afirmes que hiciste algo (crear un recordatorio, abrir una app, guardar un recuerdo) si recibiste un bloque \(resultOpen) de éxito en esta conversación. Si fue rechazado por el usuario o falló, dilo tal cual, en lenguaje sencillo.
+        - Los bloques \(resultOpen), los nombres de herramientas, el JSON y los códigos de error son internos: NUNCA los escribas al usuario. Cuéntale el resultado con tus palabras. Si algo falló por un motivo técnico, explica lo que puede hacer (p. ej. activar un permiso) sin jerga.
         - No puedes controlar apps arbitrarias, leer la pantalla, ni escuchar con la app cerrada. No finjas poder hacerlo.
         """)
 
@@ -68,7 +82,7 @@ public enum Persona {
             var lines: [String] = []
             for tool in context.tools {
                 let params = tool.parameters.map { "\($0.name)\($0.required ? "" : "?"): \($0.description)" }.joined(separator: "; ")
-                let confirm = tool.risk == .sensitive ? " [pide confirmación al usuario]" : ""
+                let confirm = tool.risk.requiresConfirmation ? " [la app pide confirmación al usuario]" : ""
                 lines.append("- \(tool.name)(\(params)): \(tool.summary)\(confirm)")
             }
             sections.append("""
@@ -77,11 +91,13 @@ public enum Persona {
 
             Para usar una, escribe en una línea aparte, exactamente: \
             \(toolOpen){"name":"nombre_herramienta","args":{"clave":"valor"}}\(toolClose)
-            Después detente. El sistema ejecutará la acción y te responderá con un mensaje que empieza por \(resultMarker); \
-            solo entonces cuéntale al usuario qué pasó. Usa una herramienta solo cuando el usuario lo pida o sea claramente \
-            lo que quiere; si falta un dato imprescindible (fecha, nombre), pregunta solo por ese dato. Cuando el usuario \
-            pide algo explícito («pregúntale a Claude…», «abre…», «recuérdame…»), llama a la herramienta DE INMEDIATO: no \
-            pidas confirmación por texto, porque la app ya le muestra una hoja de confirmación en las acciones sensibles. \
+            Después detente. El sistema ejecutará la acción y te responderá con un bloque interno \(resultOpen)…\(resultClose); \
+            solo entonces cuéntale al usuario qué pasó, con tus palabras. Usa una herramienta solo cuando el usuario lo pida o \
+            sea claramente lo que quiere. Cuando el usuario pide algo explícito («consulta el clima», «mira mi agenda», \
+            «recuérdame llevar los documentos mañana a las 8», «pregúntale a Claude…»), llama a la herramienta DE INMEDIATO, \
+            sin preguntar si quiere que lo hagas: la app ya muestra su propia confirmación en las acciones que la necesitan \
+            (enlaces, Atajos, Claude, borrar). Si falta un dato IMPRESCINDIBLE, pregunta únicamente por ese dato. Si el usuario \
+            da una fecha u hora relativa («mañana a las 8»), conviértela tú a ISO 8601 con la fecha actual de arriba. \
             No inventes herramientas.
 
             Peticiones de varios pasos: encadena herramientas. Primero consulta lo necesario y, con los datos REALES del \

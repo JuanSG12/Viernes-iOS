@@ -1,6 +1,17 @@
 import Foundation
 
-public enum ToolRisk: String, Sendable { case safe, sensitive }
+/// Política de confirmaciones por TIPO de acción (no se pregunta lo que el usuario ya pidió claramente):
+/// - `safe`: consulta sin efectos (clima, agenda con permiso, recordatorios pendientes…). Se ejecuta directa.
+/// - `reversible`: crea o modifica algo que el usuario puede deshacer o revisar (recordatorio, evento, borrador de correo
+///   o mensaje, marcador). Se ejecuta directa cuando los datos bastan; el envío real lo confirma el usuario en la app destino.
+/// - `sensitive`: guarda datos personales. Pide confirmación.
+/// - `external`: saca datos del teléfono o lanza algo de terceros (enlaces, Atajos, Claude). Pide confirmación.
+/// - `destructive`: borra. Pide confirmación.
+public enum ToolRisk: String, Sendable {
+    case safe, reversible, sensitive, external, destructive
+
+    public var requiresConfirmation: Bool { self != .safe && self != .reversible }
+}
 
 public struct ToolParameter: Sendable, Equatable {
     public let name: String
@@ -38,6 +49,8 @@ public struct ToolCall: Equatable, Sendable {
 
 public enum ToolOutcome: Equatable, Sendable {
     case success(String)
+    /// Éxito con datos estructurados para mostrar una tarjeta nativa (p. ej. clima). El texto sigue siendo lo que ve el modelo.
+    case card(String, ToolCard)
     case failure(String)
 }
 
@@ -76,7 +89,7 @@ public enum ToolCatalog {
             name: "open_url",
             summary: "Abre un enlace https en el navegador.",
             parameters: [ToolParameter("url", "URL completa que empiece con https://")],
-            risk: .sensitive),
+            risk: .external),
         ToolDefinition(
             name: "create_reminder",
             summary: "Crea un recordatorio en la app Recordatorios.",
@@ -84,7 +97,7 @@ public enum ToolCatalog {
                 ToolParameter("title", "Texto del recordatorio"),
                 ToolParameter("due", "Fecha y hora ISO 8601 local, p. ej. 2026-11-05T09:00", required: false),
                 ToolParameter("notes", "Notas adicionales", required: false)
-            ], risk: .sensitive),
+            ], risk: .reversible),
         ToolDefinition(
             name: "list_reminders",
             summary: "Lista los recordatorios pendientes.",
@@ -94,7 +107,7 @@ public enum ToolCatalog {
             name: "complete_reminder",
             summary: "Marca como completado un recordatorio pendiente buscándolo por título.",
             parameters: [ToolParameter("title", "Título (o parte) del recordatorio")],
-            risk: .sensitive),
+            risk: .reversible),
         ToolDefinition(
             name: "create_event",
             summary: "Crea un evento en el Calendario.",
@@ -103,14 +116,14 @@ public enum ToolCatalog {
                 ToolParameter("start", "Inicio ISO 8601 local, p. ej. 2026-11-05T15:00"),
                 ToolParameter("duration_minutes", "Duración en minutos (1-1440, por defecto 60)", required: false),
                 ToolParameter("location", "Lugar", required: false)
-            ], risk: .sensitive),
+            ], risk: .reversible),
         ToolDefinition(
             name: "run_shortcut",
             summary: "Ejecuta un Atajo de la app Atajos por su nombre exacto.",
             parameters: [
                 ToolParameter("name", "Nombre exacto del atajo"),
                 ToolParameter("input", "Texto de entrada opcional", required: false)
-            ], risk: .sensitive),
+            ], risk: .external),
         ToolDefinition(
             name: "device_info",
             summary: "Consulta datos del dispositivo: hora, batería, almacenamiento, modelo.",
@@ -127,12 +140,12 @@ public enum ToolCatalog {
             parameters: [
                 ToolParameter("date", "today, tomorrow o una fecha YYYY-MM-DD"),
                 ToolParameter("days", "Cuántos días leer, de 1 a 7 (por defecto 1)", required: false)
-            ], risk: .sensitive),
+            ], risk: .safe),
         ToolDefinition(
             name: "find_contact",
             summary: "Busca un contacto por nombre y devuelve su correo y teléfonos. Solo existe si el usuario activó «Permitir que Viernes lea mis contactos» en Privacidad.",
             parameters: [ToolParameter("name", "Nombre o apellido a buscar")],
-            risk: .sensitive),
+            risk: .safe),
         ToolDefinition(
             name: "compose_email",
             summary: "Prepara un BORRADOR de correo en la app Correo. No envía nada: el usuario revisa y pulsa Enviar.",
@@ -140,7 +153,7 @@ public enum ToolCatalog {
                 ToolParameter("body", "Texto del correo"),
                 ToolParameter("to", "Dirección de correo del destinatario", required: false),
                 ToolParameter("subject", "Asunto", required: false)
-            ], risk: .sensitive),
+            ], risk: .reversible),
         ToolDefinition(
             name: "compose_message",
             summary: "Prepara un BORRADOR de mensaje (SMS/iMessage o WhatsApp). No envía nada: el usuario revisa y pulsa Enviar.",
@@ -148,17 +161,17 @@ public enum ToolCatalog {
                 ToolParameter("body", "Texto del mensaje"),
                 ToolParameter("to", "Teléfono del destinatario con prefijo, p. ej. +573001234567", required: false),
                 ToolParameter("app", "sms (por defecto) o whatsapp", required: false)
-            ], risk: .sensitive),
+            ], risk: .reversible),
         ToolDefinition(
             name: "call_phone",
             summary: "Abre el marcador del teléfono con un número. iOS pide su propia confirmación antes de llamar.",
             parameters: [ToolParameter("number", "Número con prefijo, p. ej. +573001234567")],
-            risk: .sensitive),
+            risk: .reversible),
         ToolDefinition(
             name: "ask_claude",
             summary: "Envía una pregunta a la app de Claude del usuario (sale de Viernes; la respuesta no vuelve aquí salvo que exista un Atajo configurado).",
             parameters: [ToolParameter("prompt", "Pregunta completa para Claude")],
-            risk: .sensitive),
+            risk: .external),
         ToolDefinition(
             name: "save_memory",
             summary: "Guarda un recuerdo local (preferencia, proyecto o dato) que el usuario pidió conservar.",
@@ -175,7 +188,7 @@ public enum ToolCatalog {
             name: "forget_memory",
             summary: "Elimina el recuerdo local que mejor coincida con la consulta.",
             parameters: [ToolParameter("query", "Qué olvidar")],
-            risk: .sensitive)
+            risk: .destructive)
     ]
 
     public static func definition(named name: String) -> ToolDefinition? { all.first { $0.name == name } }

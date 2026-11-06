@@ -107,9 +107,9 @@ final class SecurityTests: XCTestCase {
     }
 
     func testEverySensitiveToolHasADefinition() {
-        let sensitive = ToolCatalog.all.filter { $0.risk == .sensitive }.map(\.name)
-        for name in ["open_url", "create_reminder", "complete_reminder", "create_event", "run_shortcut", "ask_claude", "save_memory", "forget_memory"] {
-            XCTAssertTrue(sensitive.contains(name), "\(name) debe ser sensible")
+        let confirmed = ToolCatalog.all.filter { $0.risk.requiresConfirmation }.map(\.name)
+        for name in ["open_url", "run_shortcut", "ask_claude", "save_memory", "forget_memory"] {
+            XCTAssertTrue(confirmed.contains(name), "\(name) debe pedir confirmación")
         }
         XCTAssertEqual(Set(ToolCatalog.all.map(\.name)).count, ToolCatalog.all.count)
     }

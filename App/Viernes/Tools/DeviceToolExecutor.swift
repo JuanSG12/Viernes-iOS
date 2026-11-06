@@ -53,12 +53,118 @@ final class DeviceToolExecutor: ToolExecutor {
             let (data, response) = try await Self.weatherSession.data(from: forecastURL)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return .failure("El servicio de clima no respondió.") }
             guard let text = WeatherService.summary(place: place, forecast: data) else { return .failure("No pude interpretar el pronóstico.") }
+            // Texto real para el modelo + tarjeta nativa con los mismos datos de Open-Meteo.
+            if let card = WeatherService.card(place: place, forecast: data) { return .card(text, card) }
             return .success(text)
         } catch let error as URLError where [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed].contains(error.code) {
             return .failure("Sin conexión a internet: no puedo consultar el clima.")
+        } catch let error as URLError where error.code == .timedOut {
+            return .failure("El servicio de clima tardó demasiado en responder.")
         } catch {
-            return .failure("No pude consultar el clima: \(error.localizedDescription)")
+            Diagnostics.shared.log("clima: \(error.localizedDescription)")
+            return .failure("No pude consultar el clima ahora mismo.")
         }
+    }
+
+    // MARK: Acceso a Calendario y Recordatorios (estado REAL antes de pedir nada)
+
+    private static let calendarSettingsHint = "Actívalo en Ajustes › Viernes › Calendarios y elige «Acceso completo»."
+
+    private func label(_ status: EKAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined: return "sin solicitar"
+        case .restricted: return "restringido"
+        case .denied: return "denegado"
+        case .fullAccess: return "acceso completo"
+        case .writeOnly: return "solo escritura"
+        case .authorized: return "autorizado (antiguo)"
+        @unknown default: return "desconocido"
+        }
+    }
+
+    /// `nil` si se puede LEER el calendario; si no, un mensaje claro de qué hacer. Pide el permiso solo si hace falta y se puede.
+    private func calendarReadProblem() async -> String? {
+        let before = EKEventStore.authorizationStatus(for: .event)
+        Diagnostics.shared.log("calendario: estado antes = \(label(before))")
+        switch before {
+        case .fullAccess, .authorized:
+            return nil
+        case .denied, .restricted:
+            return "Viernes no tiene permiso para leer tu calendario. \(Self.calendarSettingsHint)"
+        case .notDetermined, .writeOnly:
+            do {
+                let granted = try await eventStore.requestFullAccessToEvents()
+                Diagnostics.shared.log("calendario: solicitud de acceso completo → \(granted)")
+            } catch {
+                Diagnostics.shared.log("calendario: error al solicitar acceso completo: \(error.localizedDescription)")
+            }
+            let after = EKEventStore.authorizationStatus(for: .event)
+            Diagnostics.shared.log("calendario: estado después = \(label(after))")
+            switch after {
+            case .fullAccess, .authorized: return nil
+            case .writeOnly: return "Viernes solo tiene permiso para AÑADIR eventos, no para leerlos. \(Self.calendarSettingsHint)"
+            default: return "Viernes no tiene permiso para leer tu calendario. \(Self.calendarSettingsHint)"
+            }
+        @unknown default:
+            return "No pude comprobar el permiso del calendario. \(Self.calendarSettingsHint)"
+        }
+    }
+
+    /// Para AÑADIR eventos basta con escritura (o acceso completo).
+    private func calendarWriteProblem() async -> String? {
+        let before = EKEventStore.authorizationStatus(for: .event)
+        switch before {
+        case .fullAccess, .writeOnly, .authorized: return nil
+        case .denied, .restricted: return "Viernes no tiene permiso para añadir eventos. Actívalo en Ajustes › Viernes › Calendarios."
+        case .notDetermined:
+            do { _ = try await eventStore.requestWriteOnlyAccessToEvents() } catch {
+                Diagnostics.shared.log("calendario: error al solicitar escritura: \(error.localizedDescription)")
+            }
+            let after = EKEventStore.authorizationStatus(for: .event)
+            return (after == .writeOnly || after == .fullAccess) ? nil : "Viernes no tiene permiso para añadir eventos. Actívalo en Ajustes › Viernes › Calendarios."
+        @unknown default: return "No pude comprobar el permiso del calendario."
+        }
+    }
+
+    private func remindersProblem() async -> String? {
+        let before = EKEventStore.authorizationStatus(for: .reminder)
+        switch before {
+        case .fullAccess, .authorized: return nil
+        case .denied, .restricted, .writeOnly:
+            return "Viernes no tiene permiso para usar tus recordatorios. Actívalo en Ajustes › Viernes › Recordatorios."
+        case .notDetermined:
+            do { _ = try await eventStore.requestFullAccessToReminders() } catch {
+                Diagnostics.shared.log("recordatorios: error al solicitar acceso: \(error.localizedDescription)")
+            }
+            let after = EKEventStore.authorizationStatus(for: .reminder)
+            return (after == .fullAccess || after == .authorized) ? nil : "Viernes no tiene permiso para usar tus recordatorios. Actívalo en Ajustes › Viernes › Recordatorios."
+        @unknown default: return "No pude comprobar el permiso de recordatorios."
+        }
+    }
+
+    /// Solicita acceso completo al calendario desde la pantalla de Permisos y devuelve un informe REAL del resultado.
+    func calendarDiagnosis() async -> String {
+        var lines: [String] = []
+        lines.append("Estado antes: \(label(EKEventStore.authorizationStatus(for: .event)))")
+        let problem = await calendarReadProblem()
+        lines.append("Estado ahora: \(label(EKEventStore.authorizationStatus(for: .event)))")
+        if let problem = problem {
+            lines.append("Resultado: no se puede leer. \(problem)")
+            return lines.joined(separator: "\n")
+        }
+        let store = EKEventStore()          // almacén nuevo, creado DESPUÉS de conceder el permiso
+        let calendars = store.calendars(for: .event)
+        lines.append("Calendarios visibles: \(calendars.count)" + (calendars.isEmpty ? "" : " (" + calendars.prefix(6).map(\.title).joined(separator: ", ") + ")"))
+        let now = Date()
+        let events = store.events(matching: store.predicateForEvents(withStart: now, end: now.addingTimeInterval(7 * 86_400), calendars: nil))
+        lines.append("Eventos en los próximos 7 días: \(events.count)")
+        if calendars.isEmpty {
+            lines.append("Aviso: iOS no muestra ningún calendario. Revisa Ajustes › Calendario › Cuentas (que haya al menos una cuenta con calendarios activos).")
+        } else {
+            lines.append("Resultado: el acceso funciona.")
+        }
+        Diagnostics.shared.log("calendario: diagnóstico → \(calendars.count) calendarios, \(events.count) eventos")
+        return lines.joined(separator: "\n")
     }
 
     // MARK: Apps y enlaces
@@ -92,10 +198,8 @@ final class DeviceToolExecutor: ToolExecutor {
     // MARK: Recordatorios y calendario (EventKit)
 
     private func createReminder(_ args: [String: String]) async -> ToolOutcome {
+        if let problem = await remindersProblem() { return .failure(problem) }
         do {
-            guard try await eventStore.requestFullAccessToReminders() else {
-                return .failure("No tengo permiso para Recordatorios. Actívalo en Ajustes › Viernes.")
-            }
             guard let calendar = eventStore.defaultCalendarForNewReminders() else { return .failure("No hay una lista de recordatorios por defecto.") }
             let reminder = EKReminder(eventStore: eventStore)
             reminder.title = args["title"] ?? "Recordatorio"
@@ -108,12 +212,13 @@ final class DeviceToolExecutor: ToolExecutor {
             try eventStore.save(reminder, commit: true)
             return .success("Recordatorio creado en «\(calendar.title)»: \(reminder.title ?? "")" + (args["due"].map { " (\($0))" } ?? ""))
         } catch {
-            return .failure("Error al crear el recordatorio: \(error.localizedDescription)")
+            Diagnostics.shared.log("recordatorios: error al crear: \(error.localizedDescription)")
+            return .failure("No pude crear el recordatorio. Inténtalo de nuevo.")
         }
     }
 
     private func incompleteReminders() async throws -> [EKReminder] {
-        guard try await eventStore.requestFullAccessToReminders() else { throw ToolError.permission("Recordatorios") }
+        if let problem = await remindersProblem() { throw ToolError.denied(problem) }
         let predicate = eventStore.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
         return await withCheckedContinuation { continuation in
             eventStore.fetchReminders(matching: predicate) { reminders in continuation.resume(returning: reminders ?? []) }
@@ -134,10 +239,11 @@ final class DeviceToolExecutor: ToolExecutor {
                 return "• \(reminder.title ?? "(sin título)")\(due)"
             }
             return .success("Pendientes (\(reminders.count) en total):\n" + lines.joined(separator: "\n"))
-        } catch ToolError.permission(let area) {
-            return .failure("No tengo permiso para \(area). Actívalo en Ajustes › Viernes.")
+        } catch ToolError.denied(let message) {
+            return .failure(message)
         } catch {
-            return .failure("Error al leer recordatorios: \(error.localizedDescription)")
+            Diagnostics.shared.log("recordatorios: error al leer: \(error.localizedDescription)")
+            return .failure("No pude leer tus recordatorios ahora mismo.")
         }
     }
 
@@ -153,19 +259,18 @@ final class DeviceToolExecutor: ToolExecutor {
             reminder.isCompleted = true
             try eventStore.save(reminder, commit: true)
             return .success("Marqué como completado: «\(reminder.title ?? "")».")
-        } catch ToolError.permission(let area) {
-            return .failure("No tengo permiso para \(area). Actívalo en Ajustes › Viernes.")
+        } catch ToolError.denied(let message) {
+            return .failure(message)
         } catch {
-            return .failure("Error al completar el recordatorio: \(error.localizedDescription)")
+            Diagnostics.shared.log("recordatorios: error al completar: \(error.localizedDescription)")
+            return .failure("No pude completar el recordatorio.")
         }
     }
 
     private func createEvent(_ args: [String: String]) async -> ToolOutcome {
+        // Para AÑADIR basta el acceso de solo escritura (la lectura es opcional y se activa aparte en Privacidad).
+        if let problem = await calendarWriteProblem() { return .failure(problem) }
         do {
-            // Acceso de SOLO ESCRITURA: Viernes puede añadir eventos pero no lee tu calendario.
-            guard try await eventStore.requestWriteOnlyAccessToEvents() else {
-                return .failure("No tengo permiso para añadir eventos al Calendario. Actívalo en Ajustes › Viernes.")
-            }
             guard let start = DateParsing.parse(args["start"] ?? "") else { return .failure("La fecha de inicio no es válida.") }
             let minutes = Int(args["duration_minutes"] ?? "") ?? 60
             let event = EKEvent(eventStore: eventStore)
@@ -182,21 +287,30 @@ final class DeviceToolExecutor: ToolExecutor {
             formatter.timeStyle = .short
             return .success("Evento creado: \(event.title ?? "") el \(formatter.string(from: start)) (\(minutes) min).")
         } catch {
-            return .failure("Error al crear el evento: \(error.localizedDescription)")
+            Diagnostics.shared.log("calendario: error al crear evento: \(error.localizedDescription)")
+            return .failure("No pude crear el evento. Inténtalo de nuevo.")
         }
     }
 
-    // MARK: Lectura de calendario y contactos (solo si el usuario lo activó en Privacidad; cada lectura pide confirmación)
+    // MARK: Lectura de calendario y contactos (solo si el usuario lo activó en Privacidad; ese interruptor ES la autorización)
 
     private func listEvents(date: String, days: Int) async -> ToolOutcome {
-        guard let range = CalendarRange.resolve(date: date, days: days, now: Date()) else { return .failure("Fecha no válida.") }
+        guard let range = CalendarRange.resolve(date: date, days: days, now: Date()) else {
+            return .failure("No entendí qué día quieres consultar. Pídeselo al usuario con una fecha o «hoy»/«mañana».")
+        }
+        if let problem = await calendarReadProblem() { return .failure(problem) }
         do {
-            guard try await eventStore.requestFullAccessToEvents() else {
-                return .failure("No tengo permiso para leer el Calendario. Actívalo en Ajustes › Viernes › Calendarios.")
+            // Almacén NUEVO tras comprobar la autorización: uno creado antes de conceder el permiso puede devolver vacío.
+            let store = EKEventStore()
+            let calendars = store.calendars(for: .event)
+            Diagnostics.shared.log("calendario: lectura \(date) → \(calendars.count) calendarios visibles")
+            guard !calendars.isEmpty else {
+                return .failure("iOS no muestra ningún calendario en este iPhone. Revisa Ajustes › Calendario › Cuentas.")
             }
-            let predicate = eventStore.predicateForEvents(withStart: range.start, end: range.end, calendars: nil)
-            let events = eventStore.events(matching: predicate).sorted { $0.startDate < $1.startDate }
-            guard !events.isEmpty else { return .success("No hay eventos en ese rango.") }
+            let predicate = store.predicateForEvents(withStart: range.start, end: range.end, calendars: nil)
+            let events = store.events(matching: predicate).sorted { $0.startDate < $1.startDate }
+            Diagnostics.shared.log("calendario: lectura \(date) → \(events.count) eventos")
+            guard !events.isEmpty else { return .success("No hay eventos en ese rango (se revisaron \(calendars.count) calendarios).") }
             let dayFormatter = DateFormatter()
             dayFormatter.locale = Locale(identifier: "es_CO")
             dayFormatter.dateFormat = "EEE d MMM"
@@ -211,15 +325,25 @@ final class DeviceToolExecutor: ToolExecutor {
             let more = events.count > 25 ? "\n(y \(events.count - 25) más)" : ""
             return .success("Eventos (\(events.count)), en orden:\n" + lines.joined(separator: "\n") + more)
         } catch {
-            return .failure("Error al leer el calendario: \(error.localizedDescription)")
+            Diagnostics.shared.log("calendario: error al leer: \(error.localizedDescription)")
+            return .failure("No pude leer tu calendario ahora mismo.")
         }
     }
 
     private func findContact(name: String) async -> ToolOutcome {
         let store = CNContactStore()
+        let before = CNContactStore.authorizationStatus(for: .contacts)
+        Diagnostics.shared.log("contactos: estado antes = \(before.rawValue)")
         do {
-            guard try await store.requestAccess(for: .contacts) else {
-                return .failure("No tengo permiso para leer Contactos. Actívalo en Ajustes › Viernes › Contactos.")
+            switch before {
+            case .denied, .restricted:
+                return .failure("Viernes no tiene permiso para leer tus contactos. Actívalo en Ajustes › Viernes › Contactos.")
+            case .notDetermined:
+                guard try await store.requestAccess(for: .contacts) else {
+                    return .failure("Viernes no tiene permiso para leer tus contactos. Actívalo en Ajustes › Viernes › Contactos.")
+                }
+            default:
+                break     // autorizado o acceso limitado (iOS 18): se lee lo que el usuario compartió
             }
             let keys: [CNKeyDescriptor] = [CNContactGivenNameKey as CNKeyDescriptor, CNContactFamilyNameKey as CNKeyDescriptor,
                                            CNContactEmailAddressesKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor]
@@ -237,7 +361,8 @@ final class DeviceToolExecutor: ToolExecutor {
             let note = matches.count > 1 ? "\nHay \(matches.count) coincidencias: si no es claro cuál es, pregunta al usuario." : ""
             return .success("Contactos:\n" + lines.joined(separator: "\n") + note)
         } catch {
-            return .failure("Error al leer los contactos: \(error.localizedDescription)")
+            Diagnostics.shared.log("contactos: error al leer: \(error.localizedDescription)")
+            return .failure("No pude leer tus contactos ahora mismo.")
         }
     }
 
@@ -335,5 +460,6 @@ final class DeviceToolExecutor: ToolExecutor {
 }
 
 private enum ToolError: Error {
-    case permission(String)
+    /// Falta un permiso: lleva el mensaje listo para el usuario (qué hacer en Ajustes).
+    case denied(String)
 }

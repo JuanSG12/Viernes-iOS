@@ -2,6 +2,35 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.4.0] — Auditoría crítica: calendario, resultados internos, confirmaciones y clima (sin verificar en iPhone)
+
+Tras probar la 0.3.0 en el iPhone: el calendario no funcionaba aun con permisos, aparecían etiquetas internas como `[RESULTADO_HERRAMIENTA]` en la conversación y Viernes preguntaba demasiado antes de actuar.
+
+### Calendario / EventKit — causas encontradas y corregidas
+- Se leía con un `EKEventStore` creado **antes** de conceder el permiso (puede devolver vacío): ahora se lee con un almacén nuevo tras comprobar la autorización.
+- No se comprobaba el estado real: con permiso de «solo escritura» (el que concede crear un evento) se pedía acceso completo a ciegas. Ahora se consulta `authorizationStatus`, se pide acceso solo si hace falta y, si queda denegado o en solo escritura, el mensaje dice exactamente qué hacer («Ajustes › Viernes › Calendarios › Acceso completo») y la tarjeta ofrece **Abrir Ajustes**.
+- Las fechas en español fallaban: el modelo enviaba `mañana` y la validación solo aceptaba `tomorrow`, así que el usuario veía un error técnico. Ahora se aceptan `hoy`, `mañana`, `pasado mañana`, `ayer`, días de la semana y `YYYY-MM-DD`.
+- La pantalla de Permisos decía «Viernes no lee tu calendario» y no permitía pedir lectura: se reescribió con el estado real (incluye «Solo escritura», Contactos) y un **diagnóstico del calendario** (pide acceso completo y muestra estado, calendarios visibles y número de eventos de los próximos 7 días) más un registro técnico local.
+- Mismas comprobaciones para Recordatorios, Eventos (escritura) y Contactos (incluye el acceso limitado de iOS 18).
+- **Sin verificar**: nada de esto se ha ejecutado en un iPhone; el diagnóstico sirve justamente para saber qué ve iOS.
+
+### Resultados de herramientas
+- Los resultados viajan en un sobre interno `<tool_result>` (el filtro de salida lo oculta aunque el modelo lo repita) y `LeakGuard` elimina en streaming cualquier eco de `[RESULTADO_HERRAMIENTA]`, JSON de llamadas o líneas `- herramienta: …`, también si llegan partidos en trozos, antes de la pantalla y de la voz.
+- El prompt ordena no citar etiquetas, nombres de herramientas ni JSON y explicar los fallos en lenguaje llano.
+- Los errores de validación y las llamadas mal formadas se **ocultan** al usuario (el modelo sí los ve y los corrige) y se registran en diagnósticos; los errores técnicos de EventKit/Contactos/red se registran y se reemplazan por un mensaje breve.
+
+### Política de confirmaciones por tipo de acción
+- `ToolRisk` ahora distingue `safe` (consultas), `reversible`, `sensitive`, `external` y `destructive`. Se ejecutan directas: clima, agenda (con el interruptor de Privacidad), contactos, recordatorios, eventos, borradores de correo/mensaje, marcador. Siguen pidiendo confirmación: guardar en memoria, enlaces, Atajos, Claude y olvidar. El prompt ordena no preguntar lo ya pedido y preguntar solo el dato imprescindible.
+- Cambio de texto en Privacidad: el interruptor de calendario/contactos **es** la autorización; ya no hay confirmación en cada lectura.
+- No existe una herramienta para borrar recordatorios, así que «Elimina todos mis recordatorios» no se puede ejecutar (el modelo debe decirlo); una herramienta así tendría riesgo `destructive`.
+
+### Clima
+- Tarjeta nativa (`WeatherCard`) con temperatura, condición, ubicación, probabilidad de lluvia, viento y humedad, hoy y mañana. Los datos son los de Open-Meteo; si falta uno, no se dibuja. No hay imágenes (la referencia muestra una foto de la ciudad: no se reproduce).
+- `ToolOutcome.card` y `ActionRecord.card` (opcional: el historial anterior sigue leyéndose).
+
+### Pruebas
+- 20 pruebas nuevas del núcleo (guardián de fugas, tarjeta de clima, política por riesgo, fechas en español, registros ocultos, diagnósticos) y ajuste de las que asumían el modelo de confirmaciones anterior.
+
 ## [0.3.0] — Rediseño visual Black Chrome / Neural Orange (sin verificar en dispositivo)
 
 ### Por qué
