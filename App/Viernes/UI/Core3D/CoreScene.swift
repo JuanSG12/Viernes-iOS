@@ -138,7 +138,7 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         coreLight.type = .omni
         coreLight.color = UIColor(red: 1.0, green: 0.48, blue: 0.08, alpha: 1)
         coreLight.intensity = 800
-        coreLight.attenuationStartDistance = 0.2
+        coreLight.attenuationStartDistance = 0.6
         coreLight.attenuationEndDistance = 3.2
         sparkNode.light = coreLight
         scene.rootNode.addChildNode(sparkNode)
@@ -268,15 +268,15 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
             sparkMaterial.emission.contents = input.state == .error ? tint : UIColor(red: 1.0, green: 0.86, blue: 0.62, alpha: 1)
             coreLight.color = tint
         }
-        for material in heatMaterials { material.emission.intensity = CGFloat(0.35 + 1.9 * energy) }
+        for material in heatMaterials { material.emission.intensity = CGFloat(0.35 + 1.0 * energy) }
         let sparkScale: Float = 0.6 + 0.8 * energy
         sparkNode.scale = SCNVector3(sparkScale, sparkScale, sparkScale)
-        coreLight.intensity = CGFloat(200 + 1500 * energy)
+        coreLight.intensity = CGFloat(150 + 600 * energy)
         rimWarm.intensity = CGFloat(260 + 520 * energy)
         // Destello contenido: un halo muy grande se leía como un disco naranja plano detrás del núcleo.
         flareNode.opacity = CGFloat(min(0.75, 0.12 + 0.5 * energy))
         let flareScale: Float = 0.5 + 0.45 * energy
         flareNode.scale = SCNVector3(flareScale, flareScale, flareScale)
-        camera.bloomIntensity = CGFloat(0.4 + 0.9 * energy)
+        camera.bloomIntensity = CGFloat(0.4 + 0.6 * energy)
     }
 }

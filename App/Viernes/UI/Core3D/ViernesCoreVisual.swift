@@ -55,6 +55,12 @@ struct ViernesCoreVisual: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// SOLO para las capturas del CI (`--uitest --uitest-no-effects`): aísla el núcleo 3D de la capa de efectos para depurar el aspecto.
+    static var overlayDisabledForQA: Bool {
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains("--uitest") && arguments.contains("--uitest-no-effects")
+    }
+
     static var renders3D: Bool {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--uitest") && !arguments.contains("--uitest-3d") { return false }
@@ -70,7 +76,9 @@ struct ViernesCoreVisual: View {
                         paused: scenePhase != .active)
                     // Partículas y red de herramientas: capa 2D transparente ENCIMA de la escena 3D. Dentro de la escena, la
                     // geometría pequeña añadida provocaba un cuadrado negro con el bloom HDR (visto en las capturas del simulador).
-                    CoreEffectsOverlay(state: state, paused: scenePhase != .active || reduceMotion)
+                    if !Self.overlayDisabledForQA {
+                        CoreEffectsOverlay(state: state, paused: scenePhase != .active || reduceMotion)
+                    }
                 }
                     .mask(
                         // La escena es opaca (el bloom HDR no admite fondo transparente): el borde se funde con el fondo de la app.
@@ -146,7 +154,6 @@ private struct CoreEffectsOverlay: View {
     private func draw(_ context: inout GraphicsContext, size: CGSize, time: Double) {
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         let radius = min(size.width, size.height) / 2
-        context.blendMode = .plusLighter
 
         if state == .thinking {
             for index in 0..<22 {
