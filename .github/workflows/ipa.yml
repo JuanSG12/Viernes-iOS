@@ -4,6 +4,10 @@ name: IPA sin firmar
 # iOS no instala apps sin firmar: Sideloadly la firma en tu PC con tu Apple ID. No se guardan claves ni certificados aquí.
 # Se lanza a mano: Actions > "IPA sin firmar" > Run workflow. El .ipa queda como artefacto de la ejecución.
 on:
+  # También se dispara al cambiar el archivo-señal (lanzable con un commit, sin abrir GitHub).
+  push:
+    paths:
+      - 'qa/ipa.trigger'
   workflow_dispatch:
     inputs:
       runner:
@@ -18,7 +22,7 @@ permissions:
 jobs:
   ipa:
     name: Compilar .ipa
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner || 'macos-26-intel' }}
     steps:
       - uses: actions/checkout@v4
 
