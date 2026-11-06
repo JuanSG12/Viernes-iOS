@@ -46,6 +46,15 @@ jobs:
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM= 2>&1 | tee build-ipa.log
 
+      # El registro solo se ve con sesión de GitHub: los errores también van al resumen de la ejecución (público).
+      - name: Resumen de errores (si falló)
+        if: failure()
+        run: |
+          echo "### Errores de compilación (IPA)" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "error:|fatal error|Could not|cannot find|No such" build-ipa.log 2>/dev/null | sort -u | head -40 | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+          echo "### Últimas líneas del registro" >> "$GITHUB_STEP_SUMMARY"
+          tail -30 build-ipa.log 2>/dev/null | cut -c1-300 | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Empaquetar Viernes.ipa
         run: |
           APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "Viernes.app" | head -1)

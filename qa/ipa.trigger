@@ -1,1 +1,1 @@
-ipa 2026-11-06T17:09:45Z nucleo-3d-calendario-confirmaciones
+ipa 2026-11-06T17:15:07Z reintento-con-resumen
