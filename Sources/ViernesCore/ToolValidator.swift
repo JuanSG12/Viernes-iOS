@@ -229,8 +229,18 @@ public enum ToolValidator {
             }
         case "find_contact":
             guard args["name"]!.count <= 100 else { throw fail("el nombre es demasiado largo.") }
+        case "update_event", "delete_event":
+            try validateEventTarget(&args, tool: call.name, timeZone: timeZone)
+            if call.name == "update_event" { try validateEventChanges(&args, tool: call.name, timeZone: timeZone) }
         case "compose_email":
-            if let to = args["to"], !ContactFormat.isValidEmail(to) { throw fail("dirección de correo no válida.") }
+            if let rawTo = args["to"] {
+                // Una dirección dictada («juan arroba gmail punto com») o con espacios se limpia antes de validar.
+                let cleaned = SpokenText.cleanEmailAddress(rawTo)
+                guard ContactFormat.isValidEmail(cleaned) else {
+                    throw fail("la dirección «\(rawTo)» no parece un correo válido. Pídele al usuario que la escriba o la deletree, o prepara el borrador sin destinatario.")
+                }
+                args["to"] = cleaned
+            }
             if let subject = args["subject"], subject.count > 200 || subject.contains("\n") { throw fail("asunto no válido.") }
         case "compose_message":
             if let to = args["to"], ContactFormat.normalizedPhone(to) == nil { throw fail("teléfono no válido.") }
@@ -264,5 +274,56 @@ public enum ToolValidator {
 
     private static func requireTitle(_ title: String, tool: String) throws {
         guard title.count <= 200 else { throw ToolValidationError.invalid(tool: tool, reason: "el título supera 200 caracteres.") }
+    }
+
+    /// Hora de 24 h válida («8», «08:00», «15:45»), normalizada a «HH:mm».
+    private static func normalizedClock(_ text: String) -> String? {
+        CalendarEventMatcher.minutes(fromClock: text).map(CalendarEventMatcher.clock)
+    }
+
+    /// Cómo se localiza el evento: al menos un criterio, con fecha y hora bien formadas.
+    private static func validateEventTarget(_ args: inout [String: String], tool: String, timeZone: TimeZone) throws {
+        func fail(_ reason: String) -> ToolValidationError { .invalid(tool: tool, reason: reason) }
+        if let title = args["title"], title.count > 200 { throw fail("el título buscado es demasiado largo.") }
+        if let date = args["date"], !CalendarRange.isValidDateArgument(date) {
+            throw fail("«date» debe ser today, tomorrow, un día de la semana o una fecha YYYY-MM-DD.")
+        }
+        if let time = args["time"] {
+            guard let normalized = normalizedClock(time) else { throw fail("«time» debe ser una hora de 24 h, p. ej. 08:00 o 15:45.") }
+            args["time"] = normalized
+        }
+        if let flag = args["just_created"] {
+            guard ["true", "false", "si", "sí", "yes", "no", "1", "0"].contains(flag.lowercased()) else { throw fail("«just_created» debe ser true o false.") }
+            args["just_created"] = CalendarEventMatcher.isTrue(flag) ? "true" : "false"
+            if args["just_created"] == "false" { args["just_created"] = nil }
+        }
+        if let id = args["event_id"], id.count > 200 || id.contains(" ") { throw fail("«event_id» no es válido.") }
+        guard EventQuery(args: args).hasCriteria else {
+            throw fail("indica cuál evento: título, día u hora (o just_created si es el que acabas de crear).")
+        }
+    }
+
+    /// Qué se quiere cambiar: al menos un cambio y cada uno bien formado.
+    private static func validateEventChanges(_ args: inout [String: String], tool: String, timeZone: TimeZone) throws {
+        func fail(_ reason: String) -> ToolValidationError { .invalid(tool: tool, reason: reason) }
+        let changeKeys = ["new_title", "new_start", "new_date", "new_time", "new_duration_minutes", "new_location"]
+        guard changeKeys.contains(where: { args[$0] != nil }) else {
+            throw fail("indica qué cambiar: new_title, new_start, new_date, new_time, new_duration_minutes o new_location.")
+        }
+        if let title = args["new_title"], title.count > 200 { throw fail("el título nuevo es demasiado largo.") }
+        if let place = args["new_location"], place.count > 200 { throw fail("el lugar nuevo es demasiado largo.") }
+        if let start = args["new_start"], DateParsing.parse(start, timeZone: timeZone) == nil {
+            throw fail("«new_start» no es válido; usa ISO 8601, p. ej. 2026-11-06T16:00.")
+        }
+        if let date = args["new_date"], !CalendarRange.isValidDateArgument(date) {
+            throw fail("«new_date» debe ser today, tomorrow, un día de la semana o YYYY-MM-DD.")
+        }
+        if let time = args["new_time"] {
+            guard let normalized = normalizedClock(time) else { throw fail("«new_time» debe ser una hora de 24 h, p. ej. 16:00.") }
+            args["new_time"] = normalized
+        }
+        if let minutes = args["new_duration_minutes"] {
+            guard let value = Int(minutes), (1...1440).contains(value) else { throw fail("«new_duration_minutes» debe estar entre 1 y 1440.") }
+        }
     }
 }

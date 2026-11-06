@@ -20,6 +20,11 @@ public enum EngineError: Error, Equatable, LocalizedError {
     }
 }
 
+/// Motores que pueden avisar de una espera (p. ej. «el proveedor pidió esperar 6 s») para mostrarla en pantalla.
+public protocol EngineStatusReporting: AnyObject {
+    var onStatus: (@Sendable (String?) -> Void)? { get set }
+}
+
 /// Contrato común de todos los "cerebros" locales. `generate` emite DELTAS de texto (no acumulados).
 public protocol LanguageModelEngine: AnyObject, Sendable {
     var descriptor: ModelDescriptor { get }

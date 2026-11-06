@@ -3,10 +3,12 @@ import ViernesCore
 
 /// Cerebro en la nube: API de chat compatible con OpenAI (Groq, Gemini…) con la clave gratuita del usuario.
 /// ⚠️ El texto de la conversación sale del iPhone hacia el proveedor. Por eso es opt-in y se explica en su pantalla.
-final class CloudEngine: LanguageModelEngine, @unchecked Sendable {
+final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked Sendable {
     let descriptor: ModelDescriptor
     private let settings: CloudBrainSettings
     private let session: URLSession
+    /// Avisos de espera para la pantalla (p. ej. «Groq pidió esperar 6 s»). `nil` = ya no hay espera.
+    var onStatus: (@Sendable (String?) -> Void)?
 
     init(descriptor: ModelDescriptor, settings: CloudBrainSettings) {
         self.descriptor = descriptor
@@ -53,11 +55,19 @@ final class CloudEngine: LanguageModelEngine, @unchecked Sendable {
                         model: self.settings.model, system: request.system, turns: request.turns,
                         maxTokens: max(request.maxTokens, OpenAIChatProtocol.minimumCloudTokens), temperature: request.temperature)
 
-                    let (bytes, response) = try await self.session.bytes(for: urlRequest)
-                    guard let http = response as? HTTPURLResponse else {
-                        throw EngineError.generationFailed("Respuesta no válida del proveedor.")
-                    }
-                    guard (200..<300).contains(http.statusCode) else {
+                    // Petición con reintentos: un 429 (límite del plan gratuito) con espera corta se espera y se reintenta,
+                    // avisando en pantalla; un límite diario o una espera larga se informa tal cual, con las cifras del proveedor.
+                    var rateLimitRetries = 0
+                    var opened: URLSession.AsyncBytes?
+                    while opened == nil {
+                        let (bytes, response) = try await self.session.bytes(for: urlRequest)
+                        guard let http = response as? HTTPURLResponse else {
+                            throw EngineError.generationFailed("Respuesta no válida del proveedor.")
+                        }
+                        if (200..<300).contains(http.statusCode) {
+                            opened = bytes
+                            break
+                        }
                         var body = ""
                         for try await line in bytes.lines {
                             body += line
@@ -72,9 +82,23 @@ final class CloudEngine: LanguageModelEngine, @unchecked Sendable {
                                 return
                             }
                         }
+                        if http.statusCode == 429 {
+                            let limit = OpenAIChatProtocol.parseRateLimit(retryAfterHeader: http.value(forHTTPHeaderField: "retry-after"), body: body)
+                            Diagnostics.shared.log("límite de \(self.preset.displayName): ventana \(limit.window.rawValue), espera \(limit.retryAfter.map { String($0) } ?? "?") s, \(limit.detail ?? "sin cifras"), intento \(rateLimitRetries + 1)")
+                            if rateLimitRetries < OpenAIChatProtocol.maxRateLimitRetries, let wait = OpenAIChatProtocol.automaticWait(for: limit) {
+                                rateLimitRetries += 1
+                                self.onStatus?("\(self.preset.displayName) pidió esperar \(OpenAIChatProtocol.humanDuration(wait)) (límite del plan gratuito). Reintento solo…")
+                                try await Task.sleep(nanoseconds: UInt64((wait + 0.4) * 1_000_000_000))
+                                self.onStatus?(nil)
+                                continue
+                            }
+                            self.onStatus?(nil)
+                            throw EngineError.generationFailed(OpenAIChatProtocol.rateLimitMessage(limit, provider: self.preset.displayName))
+                        }
                         throw EngineError.generationFailed(OpenAIChatProtocol.errorMessage(
                             status: http.statusCode, body: body, provider: self.preset.displayName, model: self.settings.model))
                     }
+                    guard let bytes = opened else { throw EngineError.generationFailed("Respuesta no válida del proveedor.") }
                     var yielded = false
                     var finishReason: String?
                     /// Respuesta sin una sola palabra porque el modelo agotó su límite pensando: se dice, en vez de dejarla vacía.

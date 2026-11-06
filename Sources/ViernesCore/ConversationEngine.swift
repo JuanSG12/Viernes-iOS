@@ -297,7 +297,7 @@ public actor ConversationEngine {
     func availableTools() -> [ToolDefinition] {
         ToolCatalog.all.filter { tool in
             if tool.name == "ask_claude" { return config.claudeMode != .disabled }
-            if tool.name == "list_events" { return config.calendarReadEnabled && executor != nil }
+            if ToolCatalog.calendarReadTools.contains(tool.name) { return config.calendarReadEnabled && executor != nil }
             if tool.name == "find_contact" { return config.contactsReadEnabled && executor != nil }
             if ToolCatalog.memoryToolNames.contains(tool.name) { return config.memoryPolicy.enabled }
             return executor != nil
@@ -305,7 +305,7 @@ public actor ConversationEngine {
     }
 
     private func perform(_ call: ToolCall) async -> ActionRecord {
-        let validated: ToolCall
+        var validated: ToolCall
         do {
             validated = try ToolValidator.validate(call, timeZone: config.timeZone)
         } catch {
@@ -317,7 +317,8 @@ public actor ConversationEngine {
             diagnose("herramienta no disponible: \(validated.name)")
             let reason: String
             switch validated.name {
-            case "list_events": reason = "El usuario no ha activado la lectura del calendario. Dile que puede activarla en Configuración › Privacidad › «Permitir que Viernes lea mi calendario»."
+            case "list_events", "update_event", "delete_event":
+                reason = "El usuario no ha activado la lectura del calendario (sin ella no puedo consultar ni modificar eventos). Dile que puede activarla en Configuración › Privacidad › «Permitir que Viernes lea mi calendario»."
             case "find_contact": reason = "El usuario no ha activado la lectura de contactos. Dile que puede activarla en Configuración › Privacidad › «Permitir que Viernes lea mis contactos»."
             case "ask_claude": reason = "La integración con Claude está desactivada. Dile que puede activarla en Configuración › Claude."
             default: reason = "Esa herramienta no está disponible o está desactivada."
@@ -325,7 +326,21 @@ public actor ConversationEngine {
             return ActionRecord(tool: validated.name, summary: validated.name, outcome: .failed(reason), date: clock(), showToUser: false)
         }
         let definition = ToolCatalog.definition(named: validated.name)!
-        let summary = Self.summary(for: validated)
+        var summary = Self.summary(for: validated, timeZone: config.timeZone)
+
+        // Editar o borrar algo que YA existe: primero se localiza el objeto real (identificador de EventKit verificado). Si hay
+        // ambigüedad o no existe, no se ejecuta ni se pide confirmar nada; y la confirmación muestra el objeto exacto.
+        if ToolCatalog.resolvedTools.contains(validated.name), let executor = executor,
+           let resolution = await executor.resolve(validated) {
+            switch resolution {
+            case .blocked(let reason, let askUser):
+                diagnose("\(validated.name) no continuó: \(String(reason.prefix(160)))")
+                return ActionRecord(tool: validated.name, summary: summary, outcome: .failed(reason), date: clock(), showToUser: !askUser)
+            case .ready(let pinned, let detail):
+                validated = pinned
+                summary = detail
+            }
+        }
 
         if definition.risk.requiresConfirmation {
             guard let confirmer = confirmer else {
@@ -431,6 +446,8 @@ public actor ConversationEngine {
         case "create_reminder": return "Crear recordatorio"
         case "complete_reminder": return "Completar recordatorio"
         case "create_event": return "Crear evento"
+        case "update_event": return "Modificar evento"
+        case "delete_event": return "Eliminar evento"
         case "run_shortcut": return "Ejecutar Atajo"
         case "ask_claude": return "Enviar a Claude"
         case "list_events": return "Leer tu calendario"
@@ -444,14 +461,34 @@ public actor ConversationEngine {
         }
     }
 
-    static func summary(for call: ToolCall) -> String {
+    /// «2026-11-06T15:45» → «vie 6 nov, 15:45» (si no se puede interpretar, se deja tal cual).
+    static func friendlyDate(_ iso: String?, timeZone: TimeZone) -> String {
+        guard let iso = iso else { return "" }
+        guard let date = DateParsing.parse(iso, timeZone: timeZone) else { return iso }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_CO")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEE d MMM, HH:mm"
+        return formatter.string(from: date)
+    }
+
+    static func summary(for call: ToolCall, timeZone: TimeZone = .current) -> String {
         let a = call.args
         switch call.name {
+        case "update_event", "delete_event":
+            var pieces: [String] = []
+            if let title = a["title"] { pieces.append("«\(title)»") }
+            if let date = a["date"] { pieces.append("del día \(date)") }
+            if let time = a["time"] { pieces.append("de las \(time)") }
+            if a["just_created"] == "true" { pieces.append("el que acabo de crear") }
+            let target = pieces.joined(separator: " ")
+            let verb = call.name == "delete_event" ? "Eliminar evento" : "Modificar evento"
+            return verb + (target.isEmpty ? "" : " " + target)
         case "open_app": return "Abrir \(a["app"] ?? "app")"
         case "open_url": return a["url"] ?? ""
         case "create_reminder": return "«\(a["title"] ?? "")»" + (a["due"].map { " para \($0)" } ?? "")
         case "complete_reminder": return "Completar «\(a["title"] ?? "")»"
-        case "create_event": return "«\(a["title"] ?? "")» el \(a["start"] ?? "")" + (a["duration_minutes"].map { " (\($0) min)" } ?? "")
+        case "create_event": return "«\(a["title"] ?? "")» el \(Self.friendlyDate(a["start"], timeZone: timeZone))" + (a["duration_minutes"].map { " (\($0) min)" } ?? "")
         case "run_shortcut": return "Atajo «\(a["name"] ?? "")»" + (a["input"].map { " con entrada: \($0)" } ?? "")
         case "ask_claude": return "Pregunta: \(a["prompt"] ?? "")"
         case "save_memory": return a["text"] ?? ""

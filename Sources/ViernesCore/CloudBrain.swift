@@ -150,12 +150,127 @@ public enum OpenAIChatProtocol {
         case 404:
             return "\(provider) no encontró el modelo «\(model)». Usa «Probar conexión» para ver los disponibles."
         case 429:
-            return "Alcanzaste el límite del plan gratuito de \(provider). Espera un minuto e inténtalo de nuevo."
+            return rateLimitMessage(parseRateLimit(retryAfterHeader: nil, body: body), provider: provider)
         case 500...599:
             return "\(provider) tiene problemas ahora mismo (error \(status)). Inténtalo en un momento."
         default:
             return "\(provider) respondió con error \(status)" + (detail.map { ": \($0)" } ?? ".")
         }
+    }
+
+    // MARK: Límites del plan gratuito (HTTP 429)
+
+    /// Lo que el proveedor dijo sobre un límite de uso: cuánto esperar y si es el límite por minuto o el diario.
+    public struct RateLimit: Equatable, Sendable {
+        public enum Window: String, Sendable { case minute, day, unknown }
+        public var retryAfter: TimeInterval?
+        public var window: Window
+        /// Cifras reales del proveedor (p. ej. «límite 8000, usados 7243, pedidos 1984»), solo para informar y diagnosticar.
+        public var detail: String?
+        public init(retryAfter: TimeInterval?, window: Window, detail: String?) {
+            self.retryAfter = retryAfter
+            self.window = window
+            self.detail = detail
+        }
+    }
+
+    /// Espera máxima que Viernes acepta hacer SOLA antes de reintentar; más allá se informa al usuario.
+    public static let maxAutomaticWait: TimeInterval = 30
+    /// Reintentos automáticos tras un 429 (por petición).
+    public static let maxRateLimitRetries = 2
+
+    /// Segundos a esperar antes de reintentar, o `nil` si no conviene esperar (límite diario o espera demasiado larga).
+    public static func automaticWait(for limit: RateLimit) -> TimeInterval? {
+        guard limit.window != .day else { return nil }
+        let wait = limit.retryAfter ?? 8                  // sin dato del proveedor: una espera prudente
+        return wait <= maxAutomaticWait ? max(wait, 1) : nil
+    }
+
+    /// Interpreta la cabecera `retry-after` y el mensaje de error del proveedor
+    /// («…on tokens per minute (TPM): Limit 8000, Used 7243, Requested 1984. Please try again in 5.4s.»).
+    public static func parseRateLimit(retryAfterHeader: String?, body: String) -> RateLimit {
+        let message = fullMessage(body) ?? body
+        let lower = message.lowercased()
+
+        var retry: TimeInterval?
+        if let header = retryAfterHeader?.trimmingCharacters(in: .whitespaces), let seconds = Double(header), seconds >= 0 { retry = seconds }
+        if retry == nil, let range = message.range(of: "try again in ", options: .caseInsensitive) {
+            retry = parseDuration(String(message[range.upperBound...]))
+        }
+
+        var window: RateLimit.Window = .unknown
+        if lower.contains("per day") || lower.contains("(tpd)") || lower.contains("(rpd)") {
+            window = .day
+        } else if lower.contains("per minute") || lower.contains("(tpm)") || lower.contains("(rpm)") {
+            window = .minute
+        } else if let retry = retry {
+            window = retry > 600 ? .day : .minute
+        }
+
+        var detail: String?
+        if let regex = try? NSRegularExpression(pattern: "Limit\\s+(\\d+),\\s*Used\\s+(\\d+),\\s*Requested\\s+(\\d+)") {
+            let ns = message as NSString
+            if let match = regex.firstMatch(in: message, range: NSRange(location: 0, length: ns.length)), match.numberOfRanges == 4 {
+                detail = "límite \(ns.substring(with: match.range(at: 1))), usados \(ns.substring(with: match.range(at: 2))), pedidos \(ns.substring(with: match.range(at: 3)))"
+            }
+        }
+        return RateLimit(retryAfter: retry, window: window, detail: detail)
+    }
+
+    /// «5.4s», «1m5.2s», «2h3m», «450ms» → segundos. Lee solo el principio del texto (hasta que deja de haber cantidades).
+    public static func parseDuration(_ text: String) -> TimeInterval? {
+        guard let regex = try? NSRegularExpression(pattern: "(\\d+(?:\\.\\d+)?)(ms|d|h|m|s)") else { return nil }
+        let ns = text as NSString
+        var total: TimeInterval = 0
+        var found = false
+        var position = 0
+        while position < ns.length {
+            let range = NSRange(location: position, length: ns.length - position)
+            guard let match = regex.firstMatch(in: text, range: range), match.range.location == position else { break }
+            guard let value = Double(ns.substring(with: match.range(at: 1))) else { break }
+            switch ns.substring(with: match.range(at: 2)) {
+            case "ms": total += value / 1_000
+            case "s": total += value
+            case "m": total += value * 60
+            case "h": total += value * 3_600
+            default: total += value * 86_400
+            }
+            found = true
+            position = match.range.location + match.range.length
+        }
+        return found ? total : nil
+    }
+
+    /// «45 s», «2 min 5 s», «1 h 5 min».
+    public static func humanDuration(_ seconds: TimeInterval) -> String {
+        let total = max(1, Int(seconds.rounded(.up)))
+        if total < 60 { return "\(total) s" }
+        if total < 3_600 { return total % 60 == 0 ? "\(total / 60) min" : "\(total / 60) min \(total % 60) s" }
+        let minutes = (total % 3_600) / 60
+        return minutes == 0 ? "\(total / 3_600) h" : "\(total / 3_600) h \(minutes) min"
+    }
+
+    public static func rateLimitMessage(_ limit: RateLimit, provider: String) -> String {
+        let figures = limit.detail.map { " (\($0))" } ?? ""
+        switch limit.window {
+        case .day:
+            let renewal = limit.retryAfter.map { " Se renueva en ≈ \(humanDuration($0))." } ?? ""
+            return "Se agotó el límite DIARIO del plan gratuito de \(provider)\(figures).\(renewal) Puedes esperar o cambiar al modelo local en Ajustes › Modelo local."
+        case .minute:
+            let wait = limit.retryAfter.map { " Espera ≈ \(humanDuration($0)) e inténtalo de nuevo." } ?? " Espera un minuto e inténtalo de nuevo."
+            return "\(provider) alcanzó el límite por minuto del plan gratuito\(figures).\(wait)"
+        case .unknown:
+            return "Alcanzaste el límite del plan gratuito de \(provider)\(figures). Espera un minuto e inténtalo de nuevo."
+        }
+    }
+
+    /// Mensaje completo del error del proveedor (sin recortar), para leer las cifras del límite.
+    static func fullMessage(_ body: String) -> String? {
+        guard let data = body.data(using: .utf8), let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        let object: [String: Any]?
+        if let dict = json as? [String: Any] { object = dict } else { object = (json as? [[String: Any]])?.first }
+        if let message = (object?["error"] as? [String: Any])?["message"] as? String, !message.isEmpty { return String(message.prefix(1_000)) }
+        return nil
     }
 
     /// Lo que el modelo intentó escribir cuando el proveedor rechazó una llamada a función (`error.failed_generation`).

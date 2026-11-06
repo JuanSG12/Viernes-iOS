@@ -65,9 +65,25 @@ public struct ConfirmationRequest: Equatable, Sendable {
     }
 }
 
+/// Resultado de identificar el objetivo de una herramienta que actúa sobre algo YA existente (editar o borrar un evento).
+public enum ToolResolution: Equatable, Sendable {
+    /// El objetivo existe y es único: `call` lleva su identificador real y `detail` describe EXACTAMENTE qué se va a tocar
+    /// (es lo que ve el usuario en la confirmación).
+    case ready(ToolCall, detail: String)
+    /// No se puede continuar. `askUser` = hay varias opciones y el modelo debe preguntar cuál (no es un fallo que enseñar).
+    case blocked(String, askUser: Bool)
+}
+
 /// Ejecuta herramientas del dispositivo. La implementación vive en la app (EventKit, UIKit...).
 public protocol ToolExecutor: AnyObject, Sendable {
     func execute(_ call: ToolCall) async -> ToolOutcome
+    /// Antes de ejecutar (y de confirmar) una herramienta de `ToolCatalog.resolvedTools`, localiza el objeto real sobre el que actúa.
+    /// `nil` = este ejecutor no necesita resolver nada.
+    func resolve(_ call: ToolCall) async -> ToolResolution?
+}
+
+public extension ToolExecutor {
+    func resolve(_ call: ToolCall) async -> ToolResolution? { nil }
 }
 
 /// Pide al usuario confirmar acciones sensibles (hoja de confirmación en la UI).
@@ -78,6 +94,10 @@ public protocol ConfirmationProvider: AnyObject, Sendable {
 public enum ToolCatalog {
     /// Herramientas que el motor de conversación maneja internamente (memoria local).
     public static let memoryToolNames: Set<String> = ["save_memory", "forget_memory", "search_memory"]
+    /// Herramientas que actúan sobre algo que ya existe: se localiza el objeto real ANTES de confirmar o ejecutar.
+    public static let resolvedTools: Set<String> = ["update_event", "delete_event"]
+    /// Herramientas de calendario que necesitan LEER la agenda (existen solo si el usuario activó la lectura en Privacidad).
+    public static let calendarReadTools: Set<String> = ["list_events", "update_event", "delete_event"]
 
     public static let all: [ToolDefinition] = [
         ToolDefinition(
@@ -117,6 +137,32 @@ public enum ToolCatalog {
                 ToolParameter("duration_minutes", "Duración en minutos (1-1440, por defecto 60)", required: false),
                 ToolParameter("location", "Lugar", required: false)
             ], risk: .reversible),
+        ToolDefinition(
+            name: "update_event",
+            summary: "Modifica un evento que YA existe en el Calendario (hora, día, título, duración o lugar). Lo localiza por título, día u hora; si varios coinciden la app lo dirá y debes preguntar cuál. Solo existe si el usuario activó la lectura del calendario.",
+            parameters: [
+                ToolParameter("title", "Parte del título del evento a buscar", required: false),
+                ToolParameter("date", "Día en que está ahora: today, tomorrow, un día de la semana o YYYY-MM-DD", required: false),
+                ToolParameter("time", "Hora de inicio actual, 24 h, p. ej. 08:00", required: false),
+                ToolParameter("just_created", "true si el usuario habla del evento que Viernes acaba de crear", required: false),
+                ToolParameter("event_id", "Identificador exacto, solo si lo dio una herramienta", required: false),
+                ToolParameter("new_title", "Título nuevo", required: false),
+                ToolParameter("new_start", "Inicio nuevo ISO 8601 local, p. ej. 2026-11-06T16:00", required: false),
+                ToolParameter("new_date", "Cambiar solo el día y conservar la hora: tomorrow, viernes o YYYY-MM-DD", required: false),
+                ToolParameter("new_time", "Cambiar solo la hora y conservar el día, 24 h, p. ej. 16:00", required: false),
+                ToolParameter("new_duration_minutes", "Duración nueva en minutos (1-1440)", required: false),
+                ToolParameter("new_location", "Lugar nuevo", required: false)
+            ], risk: .reversible),
+        ToolDefinition(
+            name: "delete_event",
+            summary: "Elimina un evento que YA existe en el Calendario. Lo localiza por título, día u hora; si varios coinciden la app lo dirá y debes preguntar cuál. La app muestra el evento exacto y pide confirmación. Solo existe si el usuario activó la lectura del calendario.",
+            parameters: [
+                ToolParameter("title", "Parte del título del evento a buscar", required: false),
+                ToolParameter("date", "Día del evento: today, tomorrow, un día de la semana o YYYY-MM-DD", required: false),
+                ToolParameter("time", "Hora de inicio, 24 h, p. ej. 08:00", required: false),
+                ToolParameter("just_created", "true si el usuario habla del evento que Viernes acaba de crear", required: false),
+                ToolParameter("event_id", "Identificador exacto, solo si lo dio una herramienta", required: false)
+            ], risk: .destructive),
         ToolDefinition(
             name: "run_shortcut",
             summary: "Ejecuta un Atajo de la app Atajos por su nombre exacto.",

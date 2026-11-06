@@ -60,9 +60,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Permisos de lectura que el usuario debe activar expresamente. Opcionales por la misma razón que `cloud`.
     public var calendarRead: Bool?
     public var contactsRead: Bool?
+    /// Dictado: revisión, glosario, correcciones aprendidas y transcripción en la nube. Opcional por la misma razón que `cloud`.
+    public var speech: SpeechSettings?
 
     public var calendarReadEnabled: Bool { calendarRead ?? false }
     public var contactsReadEnabled: Bool { contactsRead ?? false }
+    public var speechSettings: SpeechSettings { speech ?? .default }
 
     public static let `default` = AppSettings(
         selectedModelID: nil, claude: ClaudeBridgeConfig(), voice: .default, memory: .default,
@@ -99,6 +102,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         copy.voice = voice.sanitized()
         if let id = selectedModelID, ModelCatalog.descriptor(id: id) == nil { copy.selectedModelID = nil }
         copy.cloud = cloud?.sanitized()
+        copy.speech = speech?.sanitized()
         if claude.shortcutName.trimmingCharacters(in: .whitespaces).isEmpty { copy.claude.shortcutName = ClaudeBridgeConfig().shortcutName }
         return copy
     }
