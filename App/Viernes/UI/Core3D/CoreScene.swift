@@ -40,6 +40,8 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
     private var toolDots: [SCNNode] = []
     private var toolLines: [SCNNode] = []
     private var heatMaterials: [SCNMaterial] = []
+    private var glowMaterials: [SCNMaterial] = []        // partículas y red de herramientas (aditivos)
+    private var appliedTintState: CoreVisualState?
     private let sparkMaterial = SCNMaterial()
     private let flareMaterial = SCNMaterial()
 
@@ -102,18 +104,18 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
     private func buildScene() {
         scene.background.contents = UIColor(red: 0.032, green: 0.033, blue: 0.040, alpha: 1)
         scene.lightingEnvironment.contents = CoreEnvironment.studioMap()
-        scene.lightingEnvironment.intensity = 1.9
+        scene.lightingEnvironment.intensity = 2.8
 
         let radius = Self.linkRadius
         // Dos eslabones: A en el plano XY centrado en (−d,0,0); B en el plano XZ centrado en (+d,0,0). Con d = R/2 se enlazan.
         spinA.geometry = BandRingMesh.make(majorRadius: radius, halfWidth: 0.17, halfThickness: 0.05, twists: 1, wobble: 0.045)
-        spinA.geometry?.materials = [chrome(diffuse: 0.07, roughness: 0.17)]
+        spinA.geometry?.materials = [chrome(diffuse: 0.80, roughness: 0.14)]
         ringA.position = SCNVector3(-Self.linkOffset, 0, 0)
         ringA.addChildNode(spinA)
         ringA.addChildNode(heatStrip(radius: radius * 0.83, pipe: 0.011))
 
         spinB.geometry = BandRingMesh.make(majorRadius: radius, halfWidth: 0.15, halfThickness: 0.048, twists: 2, wobble: 0.05)
-        spinB.geometry?.materials = [chrome(diffuse: 0.09, roughness: 0.24)]
+        spinB.geometry?.materials = [chrome(diffuse: 0.62, roughness: 0.20)]
         ringB.position = SCNVector3(Self.linkOffset, 0, 0)
         ringB.eulerAngles.x = .pi / 2                // tumbado sobre el plano XZ (un solo eje)
         ringB.addChildNode(spinB)
@@ -123,9 +125,9 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         assembly.addChildNode(ringB)
 
         // Anillo orbital exterior, fino y más claro.
-        orbit.geometry = BandRingMesh.make(majorRadius: 1.58, halfWidth: 0.055, halfThickness: 0.022, twists: 0, wobble: 0.02, segments: 180, sides: 24)
-        orbit.geometry?.materials = [chrome(diffuse: 0.55, roughness: 0.12)]
-        orbit.addChildNode(heatStrip(radius: 1.58 * 0.97, pipe: 0.007))
+        orbit.geometry = BandRingMesh.make(majorRadius: 1.48, halfWidth: 0.055, halfThickness: 0.022, twists: 0, wobble: 0.02, segments: 180, sides: 24)
+        orbit.geometry?.materials = [chrome(diffuse: 0.92, roughness: 0.10)]
+        orbit.addChildNode(heatStrip(radius: 1.48 * 0.97, pipe: 0.007))
 
         let rig = SCNNode()
         rig.addChildNode(assembly)
@@ -147,7 +149,7 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         sparkNode.light = coreLight
         scene.rootNode.addChildNode(sparkNode)
 
-        let flare = SCNPlane(width: 2.6, height: 2.6)
+        let flare = SCNPlane(width: 1.9, height: 1.9)
         flareMaterial.lightingModel = .constant
         flareMaterial.diffuse.contents = CoreEnvironment.flareTexture()
         flareMaterial.blendMode = .add
@@ -193,17 +195,26 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         camera.vignettingIntensity = 0.55
         camera.vignettingPower = 1.4
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, 0, 6.3)
+        cameraNode.position = SCNVector3(0, 0, 5.4)
         scene.rootNode.addChildNode(cameraNode)
 
         // Partículas (pensamiento) y red de herramientas (ejecución): ocultas hasta que su estado las necesita.
-        for _ in 0..<22 {
-            let dot = SCNNode(geometry: SCNSphere(radius: 0.02))
+        // Material ADITIVO: solo suma luz (el negro no suma nada). Con opacidad de nodo variable + bloom HDR aparecía un cuadrado
+        // negro en las capturas; por eso la intensidad se varía con la emisión y nunca con `opacity`.
+        func glowMaterial() -> SCNMaterial {
             let material = SCNMaterial()
             material.lightingModel = .constant
             material.diffuse.contents = UIColor.black
-            material.emission.contents = UIColor(red: 1.0, green: 0.6, blue: 0.2, alpha: 1)
-            dot.geometry?.materials = [material]
+            material.emission.contents = UIColor(red: 1.0, green: 0.55, blue: 0.15, alpha: 1)
+            material.blendMode = .add
+            material.writesToDepthBuffer = false
+            material.isDoubleSided = true
+            glowMaterials.append(material)
+            return material
+        }
+        for _ in 0..<22 {
+            let dot = SCNNode(geometry: SCNSphere(radius: 0.02))
+            dot.geometry?.materials = [glowMaterial()]
             particleRoot.addChildNode(dot)
             particles.append(dot)
         }
@@ -213,13 +224,8 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         for _ in 0..<5 {
             let dot = SCNNode(geometry: SCNSphere(radius: 0.035))
             let line = SCNNode(geometry: SCNCylinder(radius: 0.005, height: 1))
-            for node in [dot, line] {
-                let material = SCNMaterial()
-                material.lightingModel = .constant
-                material.diffuse.contents = UIColor.black
-                material.emission.contents = UIColor(red: 1.0, green: 0.55, blue: 0.12, alpha: 1)
-                node.geometry?.materials = [material]
-            }
+            dot.geometry?.materials = [glowMaterial()]
+            line.geometry?.materials = [glowMaterial()]
             toolRoot.addChildNode(dot)
             toolRoot.addChildNode(line)
             toolDots.append(dot)
@@ -286,7 +292,7 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         phase += dt * spinSpeed
 
         // Movimiento: el conjunto gira sobre Y con cabeceo suave; cada eslabón rueda sobre su propio eje (el metal «fluye»).
-        assembly.eulerAngles = SCNVector3(0.5 + 0.12 * sin(phase * 0.9), phase * 0.55, -0.25 + 0.08 * sin(phase * 0.6))
+        assembly.eulerAngles = SCNVector3(0.85 + 0.12 * sin(phase * 0.9), phase * 0.55, -0.35 + 0.08 * sin(phase * 0.6))
         spinA.eulerAngles.z = phase * 0.9                        // giro sobre el eje de simetría de cada eslabón:
         spinB.eulerAngles.z = phase * -0.8                       // no altera su posición, así que nunca rompe el enlace
         orbit.eulerAngles = SCNVector3(1.05 + 0.1 * sin(phase * 0.5), phase * -0.35, 0.45)
@@ -296,51 +302,53 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         let focus: Float = input.state == .thinking ? 0.9 : 1.0
         orbit.scale = SCNVector3(focus * beat, focus * beat, focus * beat)
 
-        // Luz e incandescencia.
+        // Luz e incandescencia. El color solo se reasigna cuando cambia el estado (no en cada fotograma).
         let tint = Self.tint(for: input.state)
-        for material in heatMaterials {
-            material.emission.contents = tint
-            material.emission.intensity = CGFloat(0.35 + 1.9 * energy)
+        if appliedTintState != input.state {
+            appliedTintState = input.state
+            for material in heatMaterials { material.emission.contents = tint }
+            for material in glowMaterials { material.emission.contents = tint }
+            sparkMaterial.emission.contents = input.state == .error ? tint : UIColor(red: 1.0, green: 0.86, blue: 0.62, alpha: 1)
+            coreLight.color = tint
         }
-        sparkMaterial.emission.contents = input.state == .error ? tint : UIColor(red: 1.0, green: 0.86, blue: 0.62, alpha: 1)
-        let sparkScale: Float = 0.6 + 0.9 * energy
+        for material in heatMaterials { material.emission.intensity = CGFloat(0.35 + 1.9 * energy) }
+        let sparkScale: Float = 0.6 + 0.8 * energy
         sparkNode.scale = SCNVector3(sparkScale, sparkScale, sparkScale)
-        coreLight.color = tint
-        coreLight.intensity = CGFloat(250 + 2200 * energy)
+        coreLight.intensity = CGFloat(200 + 1500 * energy)
         rimWarm.intensity = CGFloat(260 + 520 * energy)
-        flareNode.opacity = CGFloat(min(1, 0.25 + 0.75 * energy))
-        let flareScale: Float = 0.55 + 0.55 * energy
+        // Destello contenido: un halo muy grande se leía como un disco naranja plano detrás del núcleo.
+        flareNode.opacity = CGFloat(min(0.75, 0.12 + 0.5 * energy))
+        let flareScale: Float = 0.5 + 0.45 * energy
         flareNode.scale = SCNVector3(flareScale, flareScale, flareScale)
-        camera.bloomIntensity = CGFloat(0.45 + 1.1 * energy)
+        camera.bloomIntensity = CGFloat(0.4 + 0.9 * energy)
 
-        updateParticles(visible: input.state == .thinking, time: clock, tint: tint)
-        updateToolNetwork(visible: input.state == .executing, time: clock, tint: tint)
+        updateParticles(visible: input.state == .thinking, time: clock)
+        updateToolNetwork(visible: input.state == .executing, time: clock)
     }
 
-    /// Pensamiento: partículas que entran en espiral hacia el centro.
-    private func updateParticles(visible: Bool, time: Float, tint: UIColor) {
+    /// Pensamiento: partículas que entran en espiral hacia el centro. La intensidad va en la emisión (material aditivo).
+    private func updateParticles(visible: Bool, time: Float) {
         particleRoot.isHidden = !visible
         guard visible else { return }
         for (index, dot) in particles.enumerated() {
             let p = (time * 0.3 + Float(index) * 0.618034).truncatingRemainder(dividingBy: 1)
-            let r: Float = 1.9 * (1 - p) + 0.1
+            let r: Float = 1.7 * (1 - p) + 0.12
             let angle = Float(index) * 2.39996 + time * (0.8 + p)
-            dot.position = SCNVector3(cos(angle) * r, sin(angle * 0.7 + Float(index)) * 0.55 * (1 - p), sin(angle) * r)
-            let size = 0.5 + 0.8 * p
+            dot.position = SCNVector3(cos(angle) * r, sin(angle * 0.7 + Float(index)) * 0.5 * (1 - p), sin(angle) * r)
+            let size = 0.5 + 0.7 * p
             dot.scale = SCNVector3(size, size, size)
-            dot.opacity = CGFloat(0.25 + 0.75 * (1 - p))
-            dot.geometry?.firstMaterial?.emission.contents = tint
+            dot.geometry?.firstMaterial?.emission.intensity = CGFloat(0.15 + 0.85 * (1 - p))
         }
     }
 
     /// Ejecución de herramientas: nodos que orbitan y se conectan al centro con líneas que pulsan.
-    private func updateToolNetwork(visible: Bool, time: Float, tint: UIColor) {
+    private func updateToolNetwork(visible: Bool, time: Float) {
         toolRoot.isHidden = !visible
         guard visible else { return }
         let count = toolDots.count
         for index in 0..<count {
             let angle = phase * 1.4 + Float(index) * 2 * Float.pi / Float(count)
-            let position = SIMD3<Float>(cos(angle) * 1.5, sin(angle * 2 + Float(index)) * 0.35, sin(angle) * 1.5)
+            let position = SIMD3<Float>(cos(angle) * 1.35, sin(angle * 2 + Float(index)) * 0.35, sin(angle) * 1.35)
             toolDots[index].position = SCNVector3(position.x, position.y, position.z)
             let length = simd_length(position)
             let line = toolLines[index]
@@ -349,11 +357,9 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
             if length > 0.001 {
                 line.simdOrientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: position / length)
             }
-            let pulse = 0.35 + 0.65 * pow(sin(time * 5 + Float(index)), 2)
-            line.opacity = CGFloat(pulse)
-            toolDots[index].opacity = CGFloat(0.5 + 0.5 * pulse)
-            toolDots[index].geometry?.firstMaterial?.emission.contents = tint
-            line.geometry?.firstMaterial?.emission.contents = tint
+            let pulse = 0.3 + 0.7 * pow(sin(time * 5 + Float(index)), 2)
+            line.geometry?.firstMaterial?.emission.intensity = CGFloat(pulse)
+            toolDots[index].geometry?.firstMaterial?.emission.intensity = CGFloat(0.6 + 0.4 * pulse)
         }
     }
 }
