@@ -5,6 +5,10 @@ name: Capturas del simulador
 # simulador, no de un iPhone real (el rendimiento y el brillo no son representativos). Los estados se fijan con argumentos de
 # lanzamiento que SOLO existen con --uitest; el uso real nunca los lee.
 on:
+  # Se dispara también al cambiar el archivo-señal (así se puede lanzar con un simple commit, sin abrir GitHub).
+  push:
+    paths:
+      - 'qa/shots.trigger'
   workflow_dispatch:
     inputs:
       runner:
