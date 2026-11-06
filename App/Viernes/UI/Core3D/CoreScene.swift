@@ -50,6 +50,12 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
     private var deform: Float = 0
     private var lastTime: TimeInterval = 0
 
+    /// SOLO capturas del CI (`--uitest --uitest-no-bloom`): apaga el bloom para saber si los cuadrados negros nacen en él.
+    private static let bloomOffForQA: Bool = {
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains("--uitest") && arguments.contains("--uitest-no-bloom")
+    }()
+
     private static let linkRadius: Float = 0.80
     private static let linkOffset: Float = 0.40
 
@@ -103,13 +109,13 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         let radius = Self.linkRadius
         // Dos eslabones: A en el plano XY centrado en (−d,0,0); B en el plano XZ centrado en (+d,0,0). Con d = R/2 se enlazan.
         spinA.geometry = BandRingMesh.make(majorRadius: radius, halfWidth: 0.17, halfThickness: 0.05, twists: 1, wobble: 0.045)
-        spinA.geometry?.materials = [chrome(diffuse: 0.80, roughness: 0.14)]
+        spinA.geometry?.materials = [chrome(diffuse: 0.80, roughness: 0.24)]
         ringA.position = SCNVector3(-Self.linkOffset, 0, 0)
         ringA.addChildNode(spinA)
         ringA.addChildNode(heatStrip(radius: radius * 0.83, pipe: 0.011))
 
         spinB.geometry = BandRingMesh.make(majorRadius: radius, halfWidth: 0.15, halfThickness: 0.048, twists: 2, wobble: 0.05)
-        spinB.geometry?.materials = [chrome(diffuse: 0.62, roughness: 0.20)]
+        spinB.geometry?.materials = [chrome(diffuse: 0.62, roughness: 0.30)]
         ringB.position = SCNVector3(Self.linkOffset, 0, 0)
         ringB.eulerAngles.x = .pi / 2                // tumbado sobre el plano XZ (un solo eje)
         ringB.addChildNode(spinB)
@@ -120,7 +126,7 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
 
         // Anillo orbital exterior, fino y más claro.
         orbit.geometry = BandRingMesh.make(majorRadius: 1.48, halfWidth: 0.055, halfThickness: 0.022, twists: 0, wobble: 0.02, segments: 180, sides: 24)
-        orbit.geometry?.materials = [chrome(diffuse: 0.92, roughness: 0.10)]
+        orbit.geometry?.materials = [chrome(diffuse: 0.92, roughness: 0.22)]
         orbit.addChildNode(heatStrip(radius: 1.48 * 0.97, pipe: 0.007))
 
         let rig = SCNNode()
@@ -137,8 +143,8 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         sparkNode.geometry = sphere
         coreLight.type = .omni
         coreLight.color = UIColor(red: 1.0, green: 0.48, blue: 0.08, alpha: 1)
-        coreLight.intensity = 800
-        coreLight.attenuationStartDistance = 0.6
+        coreLight.intensity = 120
+        coreLight.attenuationStartDistance = 0.9
         coreLight.attenuationEndDistance = 3.2
         sparkNode.light = coreLight
         scene.rootNode.addChildNode(sparkNode)
@@ -271,12 +277,12 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         for material in heatMaterials { material.emission.intensity = CGFloat(0.35 + 1.0 * energy) }
         let sparkScale: Float = 0.6 + 0.8 * energy
         sparkNode.scale = SCNVector3(sparkScale, sparkScale, sparkScale)
-        coreLight.intensity = CGFloat(150 + 600 * energy)
+        coreLight.intensity = CGFloat(40 + 120 * energy)
         rimWarm.intensity = CGFloat(260 + 520 * energy)
         // Destello contenido: un halo muy grande se leía como un disco naranja plano detrás del núcleo.
-        flareNode.opacity = CGFloat(min(0.75, 0.12 + 0.5 * energy))
+        flareNode.opacity = CGFloat(min(0.5, 0.10 + 0.4 * energy))
         let flareScale: Float = 0.5 + 0.45 * energy
         flareNode.scale = SCNVector3(flareScale, flareScale, flareScale)
-        camera.bloomIntensity = CGFloat(0.4 + 0.6 * energy)
+        camera.bloomIntensity = Self.bloomOffForQA ? 0 : CGFloat(0.4 + 0.6 * energy)
     }
 }
