@@ -23,7 +23,7 @@ permissions:
 jobs:
   shots:
     name: Capturas
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner || 'macos-26' }}
     steps:
       - uses: actions/checkout@v4
 
