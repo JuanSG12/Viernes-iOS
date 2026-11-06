@@ -1,1 +1,1 @@
-capturas 2026-11-06T16:14:22Z reintento
+capturas 2026-11-06T11:34:13.9856963-05:00 iteracion-2

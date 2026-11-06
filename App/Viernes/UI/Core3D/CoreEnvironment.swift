@@ -37,6 +37,23 @@ enum CoreEnvironment {
         }
     }
 
+    /// Punto de luz suave (blanco cálido en el centro, naranja en el borde, transparente en el límite). Se dibuja como un plano
+    /// que mira a la cámara con mezcla aditiva y se tiñe con `multiply`.
+    static func dotTexture(size: Int = 64) -> UIImage {
+        let side = CGFloat(size)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
+            let space = CGColorSpaceCreateDeviceRGB()
+            let center = CGPoint(x: side / 2, y: side / 2)
+            let gradient = CGGradient(colorsSpace: space, colors: [
+                UIColor(white: 1, alpha: 1).cgColor, UIColor(red: 1, green: 0.8, blue: 0.55, alpha: 0.55).cgColor,
+                UIColor(red: 1, green: 0.5, blue: 0.1, alpha: 0).cgColor
+            ] as CFArray, locations: [0, 0.3, 1])!
+            context.cgContext.drawRadialGradient(gradient, startCenter: center, startRadius: 0, endCenter: center, endRadius: side / 2, options: [])
+        }
+    }
+
     /// Destello en cruz con halo (se dibuja como un plano que mira a la cámara, mezcla aditiva).
     static func flareTexture(size: Int = 256) -> UIImage {
         let side = CGFloat(size)

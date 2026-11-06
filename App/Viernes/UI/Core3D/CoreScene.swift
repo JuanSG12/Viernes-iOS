@@ -38,7 +38,8 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
     private var particles: [SCNNode] = []
     private let toolRoot = SCNNode()
     private var toolDots: [SCNNode] = []
-    private var toolLines: [SCNNode] = []
+    private let linesNode = SCNNode()                // una sola malla de líneas (centro → nodos y red)
+    private let lineMaterial = SCNMaterial()
     private var heatMaterials: [SCNMaterial] = []
     private var glowMaterials: [SCNMaterial] = []        // partículas y red de herramientas (aditivos)
     private var appliedTintState: CoreVisualState?
@@ -197,24 +198,30 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         cameraNode.camera = camera
         cameraNode.position = SCNVector3(0, 0, 5.4)
         scene.rootNode.addChildNode(cameraNode)
-
         // Partículas (pensamiento) y red de herramientas (ejecución): ocultas hasta que su estado las necesita.
-        // Material ADITIVO: solo suma luz (el negro no suma nada). Con opacidad de nodo variable + bloom HDR aparecía un cuadrado
-        // negro en las capturas; por eso la intensidad se varía con la emisión y nunca con `opacity`.
-        func glowMaterial() -> SCNMaterial {
+        // Se dibujan como PLANOS DE BRILLO con textura (mezcla aditiva, igual que el destello central): las esferas pequeñas
+        // con material emisivo producían un cuadrado negro con el bloom HDR en las capturas del simulador.
+        let dotTexture = CoreEnvironment.dotTexture()
+        func glowDot(size: CGFloat) -> SCNNode {
+            let plane = SCNPlane(width: size, height: size)
             let material = SCNMaterial()
             material.lightingModel = .constant
-            material.diffuse.contents = UIColor.black
-            material.emission.contents = UIColor(red: 1.0, green: 0.55, blue: 0.15, alpha: 1)
+            material.diffuse.contents = dotTexture
+            material.multiply.contents = UIColor(red: 1.0, green: 0.7, blue: 0.35, alpha: 1)
             material.blendMode = .add
             material.writesToDepthBuffer = false
+            material.readsFromDepthBuffer = false
             material.isDoubleSided = true
+            plane.materials = [material]
             glowMaterials.append(material)
-            return material
+            let node = SCNNode(geometry: plane)
+            let billboard = SCNBillboardConstraint()
+            billboard.freeAxes = .all
+            node.constraints = [billboard]
+            return node
         }
         for _ in 0..<22 {
-            let dot = SCNNode(geometry: SCNSphere(radius: 0.02))
-            dot.geometry?.materials = [glowMaterial()]
+            let dot = glowDot(size: 0.12)
             particleRoot.addChildNode(dot)
             particles.append(dot)
         }
@@ -222,15 +229,17 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         scene.rootNode.addChildNode(particleRoot)
 
         for _ in 0..<5 {
-            let dot = SCNNode(geometry: SCNSphere(radius: 0.035))
-            let line = SCNNode(geometry: SCNCylinder(radius: 0.005, height: 1))
-            dot.geometry?.materials = [glowMaterial()]
-            line.geometry?.materials = [glowMaterial()]
+            let dot = glowDot(size: 0.2)
             toolRoot.addChildNode(dot)
-            toolRoot.addChildNode(line)
             toolDots.append(dot)
-            toolLines.append(line)
         }
+        // Las líneas hacia el centro son UNA sola malla de líneas que se reconstruye en cada fotograma.
+        lineMaterial.lightingModel = .constant
+        lineMaterial.diffuse.contents = UIColor(red: 1.0, green: 0.55, blue: 0.15, alpha: 1)
+        lineMaterial.blendMode = .add
+        lineMaterial.writesToDepthBuffer = false
+        lineMaterial.isDoubleSided = true
+        toolRoot.addChildNode(linesNode)
         toolRoot.isHidden = true
         scene.rootNode.addChildNode(toolRoot)
     }
@@ -307,7 +316,8 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         if appliedTintState != input.state {
             appliedTintState = input.state
             for material in heatMaterials { material.emission.contents = tint }
-            for material in glowMaterials { material.emission.contents = tint }
+            for material in glowMaterials { material.multiply.contents = tint }
+            lineMaterial.diffuse.contents = tint
             sparkMaterial.emission.contents = input.state == .error ? tint : UIColor(red: 1.0, green: 0.86, blue: 0.62, alpha: 1)
             coreLight.color = tint
         }
@@ -326,7 +336,7 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         updateToolNetwork(visible: input.state == .executing, time: clock)
     }
 
-    /// Pensamiento: partículas que entran en espiral hacia el centro. La intensidad va en la emisión (material aditivo).
+    /// Pensamiento: puntos de luz que entran en espiral hacia el centro.
     private func updateParticles(visible: Bool, time: Float) {
         particleRoot.isHidden = !visible
         guard visible else { return }
@@ -337,7 +347,7 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
             dot.position = SCNVector3(cos(angle) * r, sin(angle * 0.7 + Float(index)) * 0.5 * (1 - p), sin(angle) * r)
             let size = 0.5 + 0.7 * p
             dot.scale = SCNVector3(size, size, size)
-            dot.geometry?.firstMaterial?.emission.intensity = CGFloat(0.15 + 0.85 * (1 - p))
+            dot.opacity = CGFloat(0.2 + 0.8 * (1 - p))
         }
     }
 
@@ -346,20 +356,25 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         toolRoot.isHidden = !visible
         guard visible else { return }
         let count = toolDots.count
+        var vertices: [SCNVector3] = [SCNVector3(0, 0, 0)]
+        var indices: [UInt32] = []
         for index in 0..<count {
             let angle = phase * 1.4 + Float(index) * 2 * Float.pi / Float(count)
-            let position = SIMD3<Float>(cos(angle) * 1.35, sin(angle * 2 + Float(index)) * 0.35, sin(angle) * 1.35)
-            toolDots[index].position = SCNVector3(position.x, position.y, position.z)
-            let length = simd_length(position)
-            let line = toolLines[index]
-            line.position = SCNVector3(position.x / 2, position.y / 2, position.z / 2)
-            line.scale = SCNVector3(1, length, 1)
-            if length > 0.001 {
-                line.simdOrientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: position / length)
-            }
+            let position = SCNVector3(cos(angle) * 1.35, sin(angle * 2 + Float(index)) * 0.35, sin(angle) * 1.35)
+            toolDots[index].position = position
             let pulse = 0.3 + 0.7 * pow(sin(time * 5 + Float(index)), 2)
-            line.geometry?.firstMaterial?.emission.intensity = CGFloat(pulse)
-            toolDots[index].geometry?.firstMaterial?.emission.intensity = CGFloat(0.6 + 0.4 * pulse)
+            toolDots[index].opacity = CGFloat(0.5 + 0.5 * pulse)
+            vertices.append(position)
+            indices.append(contentsOf: [0, UInt32(index + 1)])
         }
+        // Aristas entre nodos contiguos (la «red»).
+        for index in 0..<count {
+            indices.append(contentsOf: [UInt32(index + 1), UInt32((index + 1) % count + 1)])
+        }
+        linesNode.geometry = SCNGeometry(
+            sources: [SCNGeometrySource(vertices: vertices)],
+            elements: [SCNGeometryElement(indices: indices, primitiveType: .line)])
+        linesNode.geometry?.materials = [lineMaterial]
+        lineMaterial.transparency = CGFloat(0.55 + 0.45 * pow(sin(time * 4), 2))
     }
 }
