@@ -11,10 +11,12 @@ Nada de esto se ha probado todavía en un iPhone (ver [INSTALL.md](INSTALL.md#pr
 | Idioma | Español. Preferencia configurable (es-CO por defecto). Se elige la primera variante (es-CO, es-MX, es-US, es-419, es-ES) que tenga **reconocimiento en el dispositivo**. |
 | Privacidad | `requiresOnDeviceRecognition = true` cuando el dispositivo lo soporta. Si **ninguna** variante lo soporta, Viernes **no** usa los servidores de Apple a menos que lo actives en «Escucha y activación › Permitir reconocimiento de Apple por internet»; en su lugar muestra cómo descargar el dictado. **Función que depende de internet**: solo ese modo opt-in. |
 | Transcripción | Resultados parciales en vivo (se muestran sobre el núcleo); puntuación automática en modo comando. |
-| Fin de frase | `SilenceDetector`: nivel RMS (dBFS) con suelo de ruido adaptativo; cierra tras 1,3 s de silencio habiendo hablado ≥ 0,25 s; 7 s sin voz = «no escuché»; tope de 40 s. Además, volver a tocar el botón cierra la frase al instante. |
-| Interrupción | Tocar el núcleo o el botón (parar de hablar / interrumpir respuesta / cancelar pensamiento). |
+| Fin de frase | `SilenceDetector`: nivel RMS (dBFS) con suelo de ruido adaptativo; cierra tras una pausa configurable (0,8–3 s, **1,8 s por defecto desde la 0.6.0**; antes 1,3 s fijo) habiendo hablado ≥ 0,25 s, y espera un poco más si el reconocedor aún está añadiendo palabras; 7 s sin voz = «no escuché»; tope de 40 s. Además, volver a tocar el botón cierra la frase al instante. |
+| Interrupción | Tocar el núcleo o el botón (parar de hablar / interrumpir respuesta / cancelar pensamiento). Una llamada, Siri o un cambio de audífonos cierran la frase con lo transcrito hasta ese momento (0.6.0). |
 | Permisos | Micrófono y reconocimiento se piden solo al primer uso, tras el onboarding que explica para qué. Denegado ⇒ mensaje y botón a Ajustes. |
-| Errores | Códigos benignos (1110 «sin voz», 301 «cancelado») se tratan como fin normal; el resto se muestran y el núcleo pasa a *Error* 2,5 s. |
+| Errores | Códigos benignos (1110 «sin voz», 301 «cancelado») se tratan como fin normal; ante otros errores sin texto se **reinicia el reconocimiento una vez**; «falta el modelo de dictado» y «dictado desactivado» tienen mensaje propio; lo demás se muestra y el núcleo pasa a *Error* 2,5 s. Todo queda en el diagnóstico (0.6.0). |
+| Nombres y correcciones | `contextualStrings` con tu glosario, corrección automática prudente, correos dictados y aprendizaje de tus ediciones; revisión «Entendí…» antes de enviar (0.6.0). Ver **VOICE_AUDIT.md**. |
+| Whisper de Groq | Opcional, apagado, con consentimiento: ver **VOICE_AUDIT.md**. El audio solo sale en frases dictadas con el botón. |
 | Eficiencia | Un solo `AVAudioEngine`; tap de 1024 muestras; cálculo de RMS en el hilo de audio y salto a `@MainActor`. |
 
 **Evaluado y no incluido aún**
