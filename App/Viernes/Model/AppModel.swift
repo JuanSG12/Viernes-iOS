@@ -30,6 +30,24 @@ enum EngineStatus: Equatable {
     var isReady: Bool { self == .ready }
 }
 
+/// Lo que se envió al cerebro por voz: el texto final, lo que se entendió antes de corregirlo y la ficha de diagnóstico.
+struct VoiceSubmission: Equatable {
+    let text: String
+    let heard: String
+    let recordID: UUID
+}
+
+/// Una frase dictada que el usuario puede revisar y corregir antes de que llegue al cerebro.
+struct PendingTranscript: Identifiable, Equatable {
+    let id = UUID()
+    var text: String
+    let recordID: UUID
+    /// Lo que se entendió ANTES de la corrección automática y de cualquier edición: base para aprender de las correcciones.
+    let heard: String
+    /// Se enviará sola al terminar la cuenta atrás; editar el texto la cancela.
+    var autoSend: Bool
+}
+
 /// Estado y orquestación de toda la app. Una sola fuente de verdad para las pantallas.
 @MainActor
 final class AppModel: ObservableObject {
@@ -56,6 +74,10 @@ final class AppModel: ObservableObject {
     @Published var permissionTick = 0
     @Published var memoryUnlocked = true
     @Published var busyNote: String?
+    /// Espera impuesta por el proveedor del cerebro en la nube (p. ej. «Groq pidió esperar 6 s»); nil si no hay.
+    @Published var engineWaitNote: String?
+    /// Lo que Viernes entendió por voz, esperando a que el usuario lo revise antes de enviarlo (ver `SpeechSettings.review`).
+    @Published var pendingTranscript: PendingTranscript?
     @Published private(set) var activeModel: ModelDescriptor
     @Published var settings: AppSettings {
         didSet { if settings != oldValue { settingsChanged(from: oldValue) } }
@@ -72,6 +94,10 @@ final class AppModel: ObservableObject {
 
     // MARK: Servicios
     let confirmation = ConfirmationCenter()
+    /// Vista previa de borradores de correo (la herramienta compose_email espera a que el usuario decida).
+    let mailDrafts = MailDraftCenter()
+    /// Historial local de reconocimiento de voz, para diagnóstico.
+    let recognition = RecognitionHistory()
     private let claude = ClaudeCoordinator()
     /// Ejecutor de herramientas del dispositivo (también lo usa la pantalla de Permisos para el diagnóstico del calendario).
     private let tools: DeviceToolExecutor
@@ -85,6 +111,12 @@ final class AppModel: ObservableObject {
     private let monitor = NWPathMonitor()
 
     private var generationTask: Task<Void, Never>?
+    /// Transcripción en la nube / corrección en curso (se cancela como cualquier otra generación).
+    private var transcribeTask: Task<Void, Never>?
+    private var pendingTask: Task<Void, Never>?
+    /// Última frase enviada por voz (para el botón «corregir» y para aprender de las correcciones).
+    private var lastVoiceSubmission: VoiceSubmission?
+    private var correctionBase: VoiceSubmission?
     private var generationID = 0            // un Task cancelado que termina tarde no debe tocar al nuevo
     private var loadTask: Task<Void, Never>?
     private var bootstrapped = false
@@ -108,7 +140,7 @@ final class AppModel: ObservableObject {
         engine = UnavailableEngine(descriptor: initial, reason: "Aún no se ha cargado ningún modelo.")
         memoryStore = SwiftDataMemoryStore(modelContainer: container)
         conversations = ConversationRepository(modelContainer: container)
-        let executor = DeviceToolExecutor(claude: claude)
+        let executor = DeviceToolExecutor(claude: claude, mailDrafts: mailDrafts)
         tools = executor
         conversation = ConversationEngine(engine: engine, memory: memoryStore, executor: executor, confirmer: confirmation,
                                           config: ConversationConfig(memoryPolicy: loaded.memory, claudeMode: loaded.claude.mode,
@@ -159,6 +191,7 @@ final class AppModel: ObservableObject {
             Task { @MainActor in self?.handleMemoryWarning() }
         }
 
+        recognition.load(persist: shouldKeepRecognitionHistory)
         _ = try? await conversations.prune(retention: settings.transcriptRetention)
         await reloadMemory()
         await reloadHistory()
@@ -181,9 +214,11 @@ final class AppModel: ObservableObject {
             guard let self = self else { return }
             self.audioLevel = self.audioLevel * 0.6 + level * 0.4
         }
-        listener.onFinal = { [weak self] text in self?.transcriptFinished(text) }
+        listener.onFinal = { [weak self] outcome in self?.transcriptFinished(outcome) }
         listener.onWake = { [weak self] match in self?.wakeDetected(match) }
         listener.onError = { [weak self] message in self?.fail(message) }
+        listener.onDiagnostic = { [weak self] record in self?.recognition.add(record) }
+        listener.onInterruptionEnded = { [weak self] in self?.refreshWakeWord() }
         speaker.onStart = { [weak self] in if self?.coreState != .error { self?.coreState = .speaking } }
         speaker.onWord = { [weak self] in self?.speakPulse = Date() }
         speaker.onFinish = { [weak self] in self?.speechFinished() }
@@ -203,6 +238,10 @@ final class AppModel: ObservableObject {
 
         if let real = EngineProvider.makeEngine(for: descriptor, cloud: settings.cloudBrain) {
             engine = real
+            // Si el proveedor pide esperar (límite del plan gratuito), la pantalla lo dice en vez de parecer colgada.
+            if let reporting = real as? EngineStatusReporting {
+                reporting.onStatus = { [weak self] text in Task { @MainActor in self?.engineWaitNote = text } }
+            }
         } else {
             var reason = "Este modelo no está disponible en esta compilación."
             if case .unavailable(let why) = EngineProvider.foundationModelsAvailability(), descriptor.isSystemModel { reason = why }
@@ -286,7 +325,9 @@ final class AppModel: ObservableObject {
     private func pushConversationConfig() async {
         await conversation.updateConfig(ConversationConfig(
             memoryPolicy: settings.memory, claudeMode: settings.claude.mode, spokenOutput: settings.voice.speakResponses,
-            historyCharBudget: activeModel.isCloud ? 14_000 : (activeModel.isSystemModel ? 4_500 : 6_000),
+            // Nube: cada petición cuenta contra los tokens por minuto del plan gratuito (y una orden suele hacer dos peticiones),
+            // así que el historial enviado se mantiene moderado.
+            historyCharBudget: activeModel.isCloud ? 7_000 : (activeModel.isSystemModel ? 4_500 : 6_000),
             calendarReadEnabled: settings.calendarReadEnabled, contactsReadEnabled: settings.contactsReadEnabled
         ))
     }
@@ -318,6 +359,14 @@ final class AppModel: ObservableObject {
             }
         }
         if settings.requireBiometricsForMemory != old.requireBiometricsForMemory { memoryUnlocked = !settings.requireBiometricsForMemory }
+        if settings.speechSettings.keepHistory != old.speechSettings.keepHistory || settings.transcriptRetention != old.transcriptRetention {
+            recognition.setPersist(shouldKeepRecognitionHistory)
+        }
+    }
+
+    /// El historial de reconocimiento solo se guarda en disco si el usuario lo permite y no eligió conservar «nada».
+    private var shouldKeepRecognitionHistory: Bool {
+        settings.speechSettings.keepHistory && settings.transcriptRetention != .never
     }
 
     // MARK: Voz
@@ -343,12 +392,24 @@ final class AppModel: ObservableObject {
         speaker.stop()
         cancelGeneration()
         if listener.isRunning { listener.stop() }
+        if pendingTranscript != nil { discardPending() }        // volver a pulsar el micrófono = repetir la frase
         liveTranscript = ""
         wakeTriggered = false
         beginCommandListening()
     }
 
+    /// Ajustes de dictado que el escucha necesita ANTES de abrir el micrófono. El audio solo se guarda para la nube en el modo de
+    /// pulsar para hablar, y solo con la transcripción en la nube activada, consentida y con clave de Groq.
+    private func configureListener(forWake: Bool) {
+        let speech = settings.speechSettings
+        listener.contextualStrings = speech.contextualStrings()
+        listener.endSilenceSeconds = speech.endSilenceSeconds
+        listener.preferBuiltInMic = speech.preferBuiltInMic
+        listener.captureAudioForCloud = !forWake && speech.cloudTranscription && speech.cloudConsentAt != nil && CloudTranscriber.hasKey()
+    }
+
     private func beginCommandListening() {
+        configureListener(forWake: false)
         do {
             try listener.start(mode: .command, localeID: settings.recognitionLocale, allowServerFallback: settings.allowServerRecognition)
             coreState = .listening
@@ -379,16 +440,17 @@ final class AppModel: ObservableObject {
         liveTranscript = match.trailingCommand
     }
 
-    private func transcriptFinished(_ rawText: String) {
+    private func transcriptFinished(_ outcome: ListenerOutcome) {
         audioLevel = 0
-        var text = rawText
+        var text = outcome.text
         if wakeTriggered {
-            text = wakeMatcher.match(in: rawText)?.trailingCommand ?? rawText
+            text = wakeMatcher.match(in: outcome.text)?.trailingCommand ?? outcome.text
             wakeTriggered = false
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !retriedAfterWake {
                 // Dijo solo «Viernes»: se vuelve a escuchar una vez para el comando (sin hablar encima).
                 retriedAfterWake = true
                 wakeTriggered = false
+                discardAudio(outcome.audioURL)
                 beginCommandListening()
                 return
             }
@@ -396,11 +458,144 @@ final class AppModel: ObservableObject {
         liveTranscript = ""
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
+            discardAudio(outcome.audioURL)
+            recognition.add(outcome.record)           // las frases vacías también sirven para diagnosticar la captura
             coreState = .idle
             refreshWakeWord()
-        } else {
-            submit(trimmed)
+            return
         }
+        coreState = .thinking
+        transcribeTask?.cancel()
+        transcribeTask = Task { [weak self] in
+            await self?.finalizeTranscript(text: trimmed, outcome: outcome)
+        }
+    }
+
+    private func discardAudio(_ url: URL?) {
+        if let url = url { try? FileManager.default.removeItem(at: url) }
+    }
+
+    /// Frase ya dicha → (transcripción en la nube, si está activada) → corrección automática → revisión → cerebro.
+    private func finalizeTranscript(text original: String, outcome: ListenerOutcome) async {
+        var text = original
+        var record = outcome.record
+        let speech = settings.speechSettings
+
+        if let audio = outcome.audioURL {
+            // El audio solo sale del teléfono con la transcripción en la nube activada y CONSENTIDA. Si algo de eso falta, se borra.
+            if speech.cloudTranscription, speech.cloudConsentAt != nil, CloudTranscriber.hasKey() {
+                coreState = .thinking
+                busyNote = "Transcribiendo con Groq…"
+                let result = await CloudTranscriber.transcribe(fileURL: audio, terms: speech.contextualStrings())
+                busyNote = nil
+                if Task.isCancelled { return }
+                switch result {
+                case .success(let cloud):
+                    record.cloudText = cloud.text
+                    record.cloudSeconds = cloud.seconds
+                    text = cloud.text
+                case .failure(let failure):
+                    record.cloudError = failure.message
+                    showBanner("\(failure.message) Uso la transcripción del iPhone.")
+                }
+            } else {
+                discardAudio(audio)
+            }
+        }
+
+        var shown = text
+        if speech.autoCorrect {
+            let fixed = TranscriptCorrector.apply(text, glossary: speech.glossary, learned: speech.learned)
+            if fixed.text != text {
+                record.corrected = fixed.text
+                shown = fixed.text
+                Diagnostics.shared.log("voz: corrección automática → \(fixed.changes.joined(separator: "; "))")
+            }
+        }
+        recognition.add(record)
+
+        switch speech.review {
+        case .off:
+            lastVoiceSubmission = VoiceSubmission(text: shown, heard: text, recordID: record.id)
+            submit(shown)
+        case .brief, .always:
+            coreState = .idle
+            wakeWordActive = false
+            let pending = PendingTranscript(text: shown, recordID: record.id, heard: text, autoSend: speech.review == .brief)
+            pendingTranscript = pending
+            if pending.autoSend { schedulePendingAutoSend(pending.id) }
+        }
+    }
+
+    // MARK: Revisión y corrección de lo dictado
+
+    static let reviewSeconds: Double = 2.5
+
+    private func schedulePendingAutoSend(_ id: UUID) {
+        pendingTask?.cancel()
+        pendingTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.reviewSeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self = self, self.pendingTranscript?.id == id, self.pendingTranscript?.autoSend == true else { return }
+            self.confirmPending()
+        }
+    }
+
+    /// El usuario tocó «Enviar» (o terminó la cuenta atrás sin tocar nada).
+    func confirmPending() {
+        guard let pending = pendingTranscript else { return }
+        pendingTask?.cancel()
+        pendingTranscript = nil
+        let text = pending.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { refreshWakeWord(); return }
+        learnFromEdit(heard: pending.heard, edited: text, recordID: pending.recordID)
+        lastVoiceSubmission = VoiceSubmission(text: text, heard: pending.heard, recordID: pending.recordID)
+        submit(text)
+    }
+
+    /// El usuario tocó el texto para corregirlo: se cancela el envío automático.
+    func editPending(_ text: String) {
+        guard var pending = pendingTranscript else { return }
+        pending.text = text
+        pending.autoSend = false
+        pendingTranscript = pending
+        pendingTask?.cancel()
+    }
+
+    func discardPending() {
+        pendingTask?.cancel()
+        pendingTranscript = nil
+        refreshWakeWord()
+    }
+
+    /// Aprende de lo que el usuario corrigió (palabras pequeñas y claras) y lo apunta en el historial de diagnóstico.
+    private func learnFromEdit(heard: String, edited: String, recordID: UUID) {
+        guard edited != heard else { return }
+        recognition.update(recordID) { $0.edited = edited }
+        guard settings.speechSettings.autoCorrect else { return }
+        let found = TranscriptDiff.corrections(heard: heard, edited: edited)
+        guard !found.isEmpty else { return }
+        var speech = settings.speechSettings
+        speech.learned = TranscriptDiff.merge(found, into: speech.learned)
+        settings.speech = speech
+        showBanner("Aprendí: " + found.map { "«\($0.heard)» → «\($0.meant)»" }.joined(separator: ", ") + ". Puedes quitarlo en Escucha › Nombres y términos.")
+    }
+
+    /// Botón «corregir» de la última frase enviada: la vuelve a poner en el cuadro de texto para editarla y reenviarla.
+    func correctLastMessage() {
+        guard generationTask == nil, let last = messages.last(where: { $0.role == .user }) else { return }
+        if let voice = lastVoiceSubmission, voice.text == last.text { correctionBase = voice } else { correctionBase = nil }
+        typedDraft = last.text
+    }
+
+    /// Hay una frase enviada por voz que se puede corregir (el botón del lápiz solo aparece en ella).
+    var lastVoiceMessageID: UUID? {
+        guard let voice = lastVoiceSubmission, let last = messages.last(where: { $0.role == .user }), last.text == voice.text else { return nil }
+        return last.id
+    }
+
+    /// Voto del usuario en la pantalla de diagnóstico: qué transcripción fue la buena (para comparar sin suponer).
+    func vote(_ vote: TranscriptVote?, for recordID: UUID) {
+        recognition.update(recordID) { $0.vote = vote }
     }
 
     func interrupt() {
@@ -414,6 +609,8 @@ final class AppModel: ObservableObject {
         listener.stop()
         speaker.stop()
         cancelGeneration()
+        pendingTask?.cancel()
+        pendingTranscript = nil
         wakeWordActive = false
         audioLevel = 0
         liveTranscript = ""
@@ -428,6 +625,7 @@ final class AppModel: ObservableObject {
     private func finishTurn() {
         guard generationTask == nil, !speaker.isBusy, coreState != .listening, coreState != .error else { return }
         coreState = .idle
+        if pendingTranscript != nil { return }          // el usuario está revisando lo que dijo
         if settings.continuousConversation, engineStatus.isReady, sceneActive {
             Task { await startListening() }
         } else {
@@ -439,8 +637,9 @@ final class AppModel: ObservableObject {
     /// Escucha de la palabra «Viernes»: SOLO con la app en primer plano, ociosa y con el ajuste activado.
     func refreshWakeWord() {
         let wanted = settings.wakeWordEnabled && sceneActive && coreState == .idle && engineStatus.isReady
-            && Permissions.microphone == .granted && Permissions.speech == .granted
+            && Permissions.microphone == .granted && Permissions.speech == .granted && pendingTranscript == nil
         if wanted, !listener.isRunning {
+            configureListener(forWake: true)
             do {
                 try listener.start(mode: .wakeWord, localeID: settings.recognitionLocale, allowServerFallback: settings.allowServerRecognition)
                 wakeWordActive = true
@@ -460,6 +659,12 @@ final class AppModel: ObservableObject {
         let text = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         typedDraft = ""
+        if let base = correctionBase {
+            // Era la corrección de una frase dictada: se aprende lo que cambió y esta pasa a ser la frase vigente.
+            correctionBase = nil
+            learnFromEdit(heard: base.heard, edited: text, recordID: base.recordID)
+            lastVoiceSubmission = VoiceSubmission(text: text, heard: base.heard, recordID: base.recordID)
+        }
         submit(text)
     }
 
@@ -483,6 +688,7 @@ final class AppModel: ObservableObject {
             await self?.runGeneration(text)
             guard let self = self, self.generationID == id else { return }
             self.generationTask = nil
+            self.engineWaitNote = nil
             self.finishTurn()
         }
     }
@@ -523,6 +729,10 @@ final class AppModel: ObservableObject {
         generationID += 1
         generationTask?.cancel()
         generationTask = nil
+        transcribeTask?.cancel()
+        transcribeTask = nil
+        busyNote = nil
+        engineWaitNote = nil
         streamingText = ""
         liveActions = []
         activeTool = nil
@@ -681,6 +891,8 @@ final class AppModel: ObservableObject {
             try? await memoryStore.deleteAll()
             try? await conversations.deleteAll()
             try? Vault().destroyKey()
+            recognition.clear()
+            tools.clearLedger()
             CloudKeyStore.deleteAll()
             settingsStore.reset()
             messages = []

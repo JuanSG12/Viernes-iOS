@@ -2,6 +2,40 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.6.0] — Viernes 2.0: modificar y borrar eventos, correo con vista previa, dictado mejorado y límite de Groq (el CI lo compila y prueba; sin probar en el iPhone)
+
+Reporte real (iPhone, IPA #5): el calendario crea y consulta bien, pero «elimina la reunión que acabas de crear» respondía que no existe una herramienta para borrar; un correo dictado no se entendía y, al reescribirlo, salió «Alcanzaste el límite del plan gratuito de Groq».
+
+### Calendario: modificar y eliminar (lo ya resuelto —permisos, consulta, creación— no se reescribió)
+- Herramientas nuevas **`update_event`** y **`delete_event`** (solo existen con «Permitir que Viernes lea mi calendario», porque hay que leer para localizar). El ejecutor **resuelve el evento real ANTES de confirmar o ejecutar**: búsqueda por título (sin tildes ni mayúsculas), día, hora de inicio o «el que acabas de crear»; 0 coincidencias → se dice; varias → **no se elige**, se lista con sus identificadores reales de EventKit y el modelo pregunta cuál; un identificador inventado no se resuelve.
+- **Eliminar siempre confirma, mostrando el evento exacto** (título, día, hora, calendario); **modificar un evento claro no pregunta**. Calendarios de solo lectura o suscritos se rechazan con el motivo. En eventos repetidos solo se toca esa ocurrencia y se dice.
+- **Verificación real**: tras guardar o borrar, el evento se vuelve a leer desde un `EKEventStore` NUEVO y se compara con lo pedido; si iOS no refleja el cambio, el resultado es un fallo, no un «listo». Los errores de EventKit se informan con su motivo.
+- «Ponla para el viernes» (`new_date`) conserva la hora; «a las 4 de la tarde» (`new_time`) conserva el día.
+- Identificadores: el registro local `EventLedger` guarda los eventos que Viernes crea (id de EventKit) para entender «el que acabamos de crear» solo entre lo que Viernes creó en las últimas 12 horas y todavía existe; nunca «el más reciente del calendario».
+- La tarjeta de «crear evento» deja de enseñar la fecha en ISO.
+
+### Correo
+- `compose_email` ahora **muestra una vista previa editable** (para, asunto, mensaje) y espera a que el usuario decida: **Abrir en Correo** (compositor de iOS `MFMailComposeViewController` si hay cuenta, con resultado real: enviado/guardado/cancelado/fallido; si no, `mailto:`), **Usar otra app de correo**, **Copiar** o **Descartar**. Si no se puede abrir, el borrador se conserva en la hoja para copiarlo. Al modelo se le cuenta lo que pasó de verdad; nunca «enviado» si el usuario no pulsó Enviar.
+- Una dirección **dictada** («kisameyguy arroba gmail punto com») se convierte en dirección antes de validar; una no válida da un error claro para el modelo. Sin destinatario conocido el borrador se prepara igual y se avisa.
+- `find_contact` también busca por apodo y empresa.
+- Instrucciones del prompt: redactar asunto y cuerpo, buscar al destinatario en recuerdos/contactos, preguntar solo si no se sabe de qué trata.
+
+### Límite de Groq (HTTP 429)
+- Causa probable (por lectura del código y de la documentación de Groq; **sin confirmar con tus cifras reales**): cada petición enviaba hasta 14 000 caracteres de historial + el prompt completo + 1 500 tokens reservados, y una orden con herramienta hace dos peticiones; con un límite por minuto del plan gratuito eso se agota rápido.
+- Ahora: el historial enviado a la nube baja a 7 000 caracteres; lo que cambia en cada petición (hora, recuerdos) va al final del prompt para que la caché de prompt del proveedor aproveche el principio; un 429 con espera corta (≤ 30 s) se **espera y se reintenta solo (máx. 2 veces)** y la pantalla dice «Groq pidió esperar N s»; un límite **diario** o una espera larga se informa con el tiempo y las cifras reales del proveedor (límite/usados/pedidos), que además quedan en el registro técnico.
+
+### Voz (ver VOICE_AUDIT.md)
+- Auditoría completa del reconocimiento por lectura de código. Hallazgos corregidos: faltaban `contextualStrings` (nombres propios), no se manejaban interrupciones de audio ni cambios de audífonos, el silencio fijo de 1,3 s cortaba al hacer pausas, solo se trataban dos códigos de error y el fallo del reconocedor no se reintentaba.
+- **Revisión antes de enviar** (apagada/«2,5 s»/siempre): lo entendido aparece editable con «Enviar», «Editar» y «Descartar»; en el modo breve se envía solo. Un **lápiz** junto a la última frase dictada permite corregirla y reenviarla.
+- **Corrección automática y aprendizaje**: glosario de nombres (sesga al reconocedor y corrige lo transcrito, de forma prudente), correos dictados, y correcciones aprendidas de lo que editas (visibles y borrables en «Nombres y términos»).
+- Pausa para cerrar la frase configurable (0,8–3 s; por defecto 1,8 s), espera si el reconocedor aún añade palabras, un reinicio automático ante errores recuperables, mensajes claros para «falta el modelo de dictado» y «dictado desactivado», y opción de usar el micrófono del iPhone con audífonos Bluetooth.
+- **Diagnóstico de reconocimiento**: historial cifrado (texto, nunca audio) con entrada de audio, idioma realmente usado, duración, motivo del fin, parciales, error, reinicios, interrupciones, lo corregido y lo editado.
+- **Whisper de Groq (opcional)**: apagado por defecto; al activarlo se pide consentimiento y el audio de las frases dictadas con el botón (nunca el de la escucha «Viernes», nunca a ElevenLabs) se envía a Groq como WAV de 16 kHz y se borra al terminar. El reconocimiento local sigue siendo la base y el respaldo. El diagnóstico guarda ambas versiones y permite votar cuál acertó; **no se afirma que Whisper sea mejor**.
+
+### Pruebas
+- ≈ 70 pruebas nuevas en `Viernes2Tests.swift` (búsqueda y ambigüedad de eventos, cambios de día/hora, validación, confirmaciones, correo dictado, límites de Groq, corrección y aprendizaje, ajustes de consentimiento, diagnóstico, `mailto:`, Whisper).
+- **Sin verificar en el iPhone**: EventKit real (resolver/modificar/borrar/releer), el compositor de correo, el dictado, la captura de audio para Whisper y el comportamiento exacto de Groq. Los pasos para probarlo están en VOICE_AUDIT.md y en el resumen de la sesión.
+
 ## [0.5.1] — Agente más robusto y núcleo sin cuadrados negros (pendiente de probar en el iPhone)
 
 Reporte real (iPhone, IPA #4): al pedir «agendar una reunión» o «ver mi agenda» salía «El modelo no devolvió texto», y el núcleo mostraba cuadrados negros al moverse.

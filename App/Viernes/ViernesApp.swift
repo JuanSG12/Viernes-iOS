@@ -28,6 +28,7 @@ struct ViernesApp: App {
             RootView(launchError: launchError)
                 .environmentObject(model)
                 .environmentObject(model.confirmation)
+                .environmentObject(model.mailDrafts)
                 .preferredColorScheme(.dark)
                 .task { await model.bootstrap() }
                 .onOpenURL { model.handle(url: $0) }

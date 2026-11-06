@@ -83,8 +83,6 @@ public enum Persona {
         - No puedes controlar apps arbitrarias, leer la pantalla, ni escuchar con la app cerrada. No finjas poder hacerlo.
         """)
 
-        sections.append("Fecha y hora actuales: \(formattedNow(context.now, timeZone: context.timeZone)).")
-
         if !context.tools.isEmpty {
             var lines: [String] = []
             for tool in context.tools {
@@ -146,6 +144,10 @@ public enum Persona {
         case .shortcut:
             sections.append("Puedes enviar una pregunta a Claude con ask_claude mediante un Atajo del usuario. La respuesta puede o no volver aquí; no prometas que lo hará.")
         }
+
+        // Lo que cambia en cada petición (la hora y los recuerdos) va AL FINAL: así el principio del prompt es idéntico entre
+        // peticiones y los proveedores con caché de prompt (Groq) no vuelven a contar ese tramo contra el límite por minuto.
+        sections.append("Fecha y hora actuales: \(formattedNow(context.now, timeZone: context.timeZone)).")
 
         if context.memories.isEmpty {
             sections.append("Memoria: no hay recuerdos relevantes para este mensaje.")

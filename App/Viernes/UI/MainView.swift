@@ -25,6 +25,7 @@ private enum QAOverrides {
 struct MainView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var confirmation: ConfirmationCenter
+    @EnvironmentObject var mailDrafts: MailDraftCenter
     @State private var sheet: Sheet?
     @State private var keyboardMode = false
     @FocusState private var inputFocused: Bool
@@ -68,6 +69,7 @@ struct MainView: View {
         .animation(.easeInOut(duration: 0.3), value: inConversation)
         // Una confirmación no puede presentarse encima de otra hoja: se cierra la que esté abierta.
         .onChange(of: confirmation.current) { _, request in if request != nil { sheet = nil } }
+        .onChange(of: mailDrafts.current) { _, draft in if draft != nil { sheet = nil } }
         .sheet(item: $sheet) { which in
             NavigationStack {
                 switch which {
@@ -83,6 +85,14 @@ struct MainView: View {
             ConfirmationSheet(request: item.request)
                 .environmentObject(confirmation)
                 .presentationDetents([.medium])
+                .presentationBackground(Theme.ink)
+                .interactiveDismissDisabled()
+        }
+        // Vista previa del correo: la herramienta compose_email espera a que el usuario abra Correo, copie o descarte.
+        .sheet(item: Binding(get: { mailDrafts.current }, set: { _ in })) { draft in
+            MailDraftSheet(draft: draft)
+                .environmentObject(mailDrafts)
+                .presentationDetents([.large])
                 .presentationBackground(Theme.ink)
                 .interactiveDismissDisabled()
         }
@@ -179,6 +189,8 @@ struct MainView: View {
             let heard = model.liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
             return ("Te escucho", heard.isEmpty ? "Habla con naturalidad" : heard)
         case .thinking:
+            if let wait = model.engineWaitNote { return ("Esperando al proveedor…", wait) }
+            if let note = model.busyNote { return (note, "") }
             if let tool = model.activeTool { return (ToolPhrases.running(tool), "") }
             return ("Pensando…", "")
         case .speaking:
@@ -293,6 +305,7 @@ struct MainView: View {
 
     private var controls: some View {
         VStack(spacing: 8) {
+            if let pending = model.pendingTranscript { TranscriptReviewBar(pending: pending) }
             if keyboardMode { inputBar }
             HStack(spacing: 10) {
                 controlButton(icon: keyboardMode ? "keyboard.chevron.compact.down" : "keyboard", label: "Teclado", id: "toggle-keyboard") {

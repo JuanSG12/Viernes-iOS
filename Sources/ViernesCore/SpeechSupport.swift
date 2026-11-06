@@ -36,6 +36,8 @@ public struct SpeechSettings: Codable, Equatable, Sendable {
     /// Transcribir con Groq Whisper (el AUDIO sale del teléfono hacia Groq). Apagado por defecto y solo válido con consentimiento.
     public var cloudTranscription: Bool
     public var cloudConsentAt: Date?
+    /// Usar el micrófono del iPhone aunque haya unos audífonos Bluetooth (el micrófono Bluetooth es de menor calidad).
+    public var preferBuiltInMic: Bool
 
     public static let `default` = SpeechSettings(review: .brief, endSilenceSeconds: 1.8, glossary: [], learned: [], autoCorrect: true,
                                                  keepHistory: true, cloudTranscription: false, cloudConsentAt: nil)
@@ -44,7 +46,8 @@ public struct SpeechSettings: Codable, Equatable, Sendable {
     public static let maxLearned = 80
 
     public init(review: ReviewMode, endSilenceSeconds: Double, glossary: [String], learned: [LearnedCorrection], autoCorrect: Bool,
-                keepHistory: Bool, cloudTranscription: Bool, cloudConsentAt: Date?) {
+                keepHistory: Bool, cloudTranscription: Bool, cloudConsentAt: Date?, preferBuiltInMic: Bool = false) {
+        self.preferBuiltInMic = preferBuiltInMic
         self.review = review
         self.endSilenceSeconds = endSilenceSeconds
         self.glossary = glossary
@@ -219,6 +222,10 @@ public enum TranscriptDiff {
             }
         }
 
+        // Solo se aprende de ediciones PARECIDAS a lo oído (al menos la mitad de las palabras coinciden): reescribir la frase entera
+        // por otra distinta no es una corrección del reconocedor.
+        guard table[0][0] >= max(1, (min(a.count, b.count) + 1) / 2) else { return [] }
+
         var result: [LearnedCorrection] = []
         var i = 0, j = 0
         var heardSpan: [String] = [], meantSpan: [String] = []
@@ -290,11 +297,18 @@ public struct RecognitionRecord: Codable, Equatable, Identifiable, Sendable {
     public var cloudError: String?
     public var edited: String?              // lo que el usuario dejó tras editar
     public var vote: TranscriptVote?
+    /// Entrada de audio usada (p. ej. «iPhone (micrófono) 48000 Hz» o «Bluetooth HFP 16000 Hz»): la causa más común de mala captura.
+    public var input: String?
+    /// Algo interrumpió la captura (llamada, Siri, cambio de audífonos).
+    public var interrupted: Bool
 
     public init(id: UUID = UUID(), date: Date = Date(), locale: String, onDevice: Bool, mode: String, duration: Double,
                 endReason: EndReason, partialCount: Int, raw: String, corrected: String? = nil, confidence: Double? = nil,
                 error: String? = nil, retried: Bool = false, cloudText: String? = nil, cloudSeconds: Double? = nil,
-                cloudError: String? = nil, edited: String? = nil, vote: TranscriptVote? = nil) {
+                cloudError: String? = nil, edited: String? = nil, vote: TranscriptVote? = nil, input: String? = nil,
+                interrupted: Bool = false) {
+        self.input = input
+        self.interrupted = interrupted
         self.id = id
         self.date = date
         self.locale = locale

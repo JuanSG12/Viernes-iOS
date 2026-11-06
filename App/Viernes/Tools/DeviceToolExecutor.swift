@@ -9,11 +9,47 @@ import ViernesCore
 final class DeviceToolExecutor: ToolExecutor {
     private let eventStore = EKEventStore()
     private let claude: ClaudeCoordinator
+    private let mailDrafts: MailDraftCenter
+    private let ledger: EventLedger
 
-    init(claude: ClaudeCoordinator) { self.claude = claude }
+    init(claude: ClaudeCoordinator, mailDrafts: MailDraftCenter = MailDraftCenter(), ledger: EventLedger = EventLedger()) {
+        self.claude = claude
+        self.mailDrafts = mailDrafts
+        self.ledger = ledger
+    }
+
+    /// Borra el registro local de eventos creados por Viernes (al borrar todos los datos).
+    func clearLedger() { ledger.removeAll() }
+
+    /// Localiza el evento real ANTES de confirmar o ejecutar una modificación o eliminación (ver `ToolExecutor.resolve`).
+    func resolve(_ call: ToolCall) async -> ToolResolution? {
+        guard call.name == "update_event" || call.name == "delete_event" else { return nil }
+        switch await locateEvent(call.args) {
+        case .blocked(let message, let askUser):
+            return .blocked(message, askUser: askUser)
+        case .found(_, _, let info):
+            if let blocked = modificationBlock(info) { return .blocked(blocked, askUser: false) }
+            var pinned = call.args
+            pinned["event_id"] = info.id
+            let calendar = Calendar.current
+            let target = CalendarEventMatcher.describe(info, calendar: calendar)
+            if call.name == "delete_event" {
+                return .ready(ToolCall(name: call.name, args: pinned), detail: "Eliminar \(target)")
+            }
+            switch EventChanges.from(args: call.args, original: info, now: Date(), calendar: calendar) {
+            case .failure(let error):
+                return .blocked(error.message, askUser: false)
+            case .success(let changes):
+                guard !changes.isEmpty else { return .blocked("No se indicó ningún cambio para el evento.", askUser: true) }
+                return .ready(ToolCall(name: call.name, args: pinned), detail: "Modificar \(target) → \(changes.summaryText)")
+            }
+        }
+    }
 
     func execute(_ call: ToolCall) async -> ToolOutcome {
         switch call.name {
+        case "update_event": return await updateEvent(call.args)
+        case "delete_event": return await deleteEvent(call.args)
         case "open_app": return await openApp(call.args["app"] ?? "")
         case "open_url": return await openURL(call.args["url"] ?? "")
         case "create_reminder": return await createReminder(call.args)
@@ -285,11 +321,186 @@ final class DeviceToolExecutor: ToolExecutor {
             formatter.locale = Locale(identifier: "es_CO")
             formatter.dateStyle = .full
             formatter.timeStyle = .short
-            return .success("Evento creado: \(event.title ?? "") el \(formatter.string(from: start)) (\(minutes) min).")
+            // Se recuerda el identificador REAL de EventKit (para «elimina el que acabamos de crear») y, si se puede leer,
+            // se comprueba con un almacén nuevo que el evento quedó guardado.
+            var verified = ""
+            if let id = event.eventIdentifier {
+                ledger.record(CreatedEventRecord(id: id, title: event.title ?? "", start: start, createdAt: Date()))
+                if EKEventStore.authorizationStatus(for: .event) == .fullAccess {
+                    if EKEventStore().event(withIdentifier: id) != nil {
+                        verified = " Comprobé que quedó guardado" + (event.calendar.map { " en el calendario «\($0.title)»" } ?? "") + "."
+                    } else {
+                        Diagnostics.shared.log("calendario: el evento recién creado no se pudo volver a leer")
+                    }
+                }
+            }
+            return .success("Evento creado: \(event.title ?? "") el \(formatter.string(from: start)) (\(minutes) min)." + verified)
         } catch {
             Diagnostics.shared.log("calendario: error al crear evento: \(error.localizedDescription)")
             return .failure("No pude crear el evento. Inténtalo de nuevo.")
         }
+    }
+
+    // MARK: Modificar y eliminar eventos existentes (EventKit)
+
+    private enum EventLocation {
+        case found(EKEvent, EKEventStore, CalendarEventInfo)
+        case blocked(String, askUser: Bool)
+    }
+
+    /// Identificador que Viernes entrega al modelo: el de EventKit; en eventos repetidos se añade la hora de la ocurrencia
+    /// (todas las ocurrencias comparten el identificador de EventKit).
+    private static func publicID(_ event: EKEvent) -> String? {
+        guard let base = event.eventIdentifier else { return nil }
+        return event.hasRecurrenceRules ? "\(base)#\(Int(event.startDate.timeIntervalSince1970))" : base
+    }
+
+    private static func info(_ event: EKEvent) -> CalendarEventInfo? {
+        guard let id = publicID(event), let start = event.startDate, let end = event.endDate else { return nil }
+        return CalendarEventInfo(id: id, title: event.title ?? "(sin título)", start: start, end: end, location: event.location ?? "",
+                                 calendarTitle: event.calendar?.title ?? "", isAllDay: event.isAllDay,
+                                 isRecurring: event.hasRecurrenceRules, allowsModifications: event.calendar?.allowsContentModifications ?? true)
+    }
+
+    /// Busca un evento por su identificador público dentro del almacén dado (nil si ya no existe).
+    private func event(forID id: String, in store: EKEventStore) -> EKEvent? {
+        if let separator = id.lastIndex(of: "#"), let stamp = TimeInterval(id[id.index(after: separator)...]) {
+            let base = String(id[..<separator])
+            let start = Date(timeIntervalSince1970: stamp)
+            let predicate = store.predicateForEvents(withStart: start.addingTimeInterval(-60), end: start.addingTimeInterval(86_400), calendars: nil)
+            return store.events(matching: predicate).first { $0.eventIdentifier == base && abs($0.startDate.timeIntervalSince(start)) < 1 }
+        }
+        return store.event(withIdentifier: id)
+    }
+
+    /// Vuelve a leer un evento desde un almacén NUEVO para comprobar de verdad lo que quedó guardado.
+    private func refetch(baseID: String, recurring: Bool, near date: Date) -> EKEvent? {
+        let store = EKEventStore()
+        if !recurring { return store.event(withIdentifier: baseID) }
+        let predicate = store.predicateForEvents(withStart: date.addingTimeInterval(-3_600), end: date.addingTimeInterval(86_400), calendars: nil)
+        return store.events(matching: predicate).first { $0.eventIdentifier == baseID && abs($0.startDate.timeIntervalSince(date)) < 60 }
+    }
+
+    private func modificationBlock(_ info: CalendarEventInfo) -> String? {
+        info.allowsModifications ? nil : "El evento «\(info.title)» está en el calendario «\(info.calendarTitle)», que no permite cambios (es de solo lectura o está suscrito). Viernes no puede modificarlo ni eliminarlo."
+    }
+
+    /// Localiza el evento pedido sin adivinar: exige permiso de lectura, busca en un almacén nuevo y distingue 0, 1 o varios.
+    private func locateEvent(_ args: [String: String]) async -> EventLocation {
+        if let problem = await calendarReadProblem() { return .blocked(problem, askUser: false) }
+        let store = EKEventStore()          // almacén NUEVO tras comprobar el permiso: uno anterior puede devolver datos viejos
+        let query = EventQuery(args: args)
+        let now = Date()
+        var candidates: [CalendarEventInfo] = []
+        var byID: [String: EKEvent] = [:]
+        if let id = query.eventID {
+            if let found = event(forID: id, in: store), let info = Self.info(found) {
+                candidates = [info]
+                byID[info.id] = found
+            }
+        } else {
+            let window = CalendarEventMatcher.searchWindow(for: query, now: now)
+            let predicate = store.predicateForEvents(withStart: window.start, end: window.end, calendars: nil)
+            for found in store.events(matching: predicate) {
+                guard let info = Self.info(found), byID[info.id] == nil else { continue }
+                candidates.append(info)
+                byID[info.id] = found
+            }
+        }
+        Diagnostics.shared.log("calendario: búsqueda de evento → \(candidates.count) candidatos")
+        switch CalendarEventMatcher.resolve(query: query, candidates: candidates, recent: ledger.recent(now: now), now: now) {
+        case .found(let info):
+            guard let found = byID[info.id] else { return .blocked("No pude abrir el evento encontrado. Inténtalo de nuevo.", askUser: false) }
+            return .found(found, store, info)
+        case .notFound(let message):
+            return .blocked(message, askUser: false)
+        case .ambiguous(let message, _):
+            return .blocked(message, askUser: true)
+        case .invalid(let message):
+            return .blocked(message, askUser: true)
+        }
+    }
+
+    private func updateEvent(_ args: [String: String]) async -> ToolOutcome {
+        let location = await locateEvent(args)
+        guard case .found(let event, let store, let info) = location else {
+            if case .blocked(let message, _) = location { return .failure(message) }
+            return .failure("No pude localizar el evento.")
+        }
+        if let blocked = modificationBlock(info) { return .failure(blocked) }
+        let calendar = Calendar.current
+        let changes: EventChanges
+        switch EventChanges.from(args: args, original: info, now: Date(), calendar: calendar) {
+        case .failure(let error): return .failure(error.message)
+        case .success(let value): changes = value
+        }
+        guard !changes.isEmpty else { return .failure("No se indicó ningún cambio para el evento.") }
+
+        let baseID = event.eventIdentifier ?? ""
+        let recurring = event.hasRecurrenceRules
+        let oldDuration = event.endDate.timeIntervalSince(event.startDate)
+        if let title = changes.title { event.title = title }
+        if let location = changes.location { event.location = location }
+        if let start = changes.start {
+            if event.isAllDay { event.isAllDay = false }
+            let length = changes.durationMinutes.map { TimeInterval($0 * 60) } ?? oldDuration
+            event.startDate = start
+            event.endDate = start.addingTimeInterval(length)
+        } else if let minutes = changes.durationMinutes {
+            event.endDate = event.startDate.addingTimeInterval(TimeInterval(minutes * 60))
+        }
+        let expectedStart: Date = event.startDate
+        let expectedEnd: Date = event.endDate
+        let expectedTitle = event.title ?? ""
+        let expectedLocation = event.location ?? ""
+
+        do {
+            try store.save(event, span: .thisEvent, commit: true)
+        } catch {
+            Diagnostics.shared.log("calendario: error al modificar evento: \(error.localizedDescription)")
+            return .failure("No pude guardar el cambio en «\(info.title)»: \(error.localizedDescription)")
+        }
+
+        // Comprobación real: se vuelve a leer desde un almacén nuevo y se compara con lo pedido.
+        guard let saved = refetch(baseID: baseID, recurring: recurring, near: expectedStart) else {
+            Diagnostics.shared.log("calendario: tras modificar, el evento no se pudo volver a leer")
+            return .failure("Pedí guardar el cambio, pero no pude comprobar que quedó guardado en el calendario. Revísalo en la app Calendario antes de darlo por hecho.")
+        }
+        let startOK = abs(saved.startDate.timeIntervalSince(expectedStart)) < 1
+        let endOK = abs(saved.endDate.timeIntervalSince(expectedEnd)) < 1
+        guard startOK, endOK, (saved.title ?? "") == expectedTitle, (saved.location ?? "") == expectedLocation else {
+            Diagnostics.shared.log("calendario: lo guardado no coincide con lo pedido")
+            return .failure("iOS no reflejó el cambio tal como se pidió (el evento quedó distinto). Revísalo en la app Calendario.")
+        }
+        guard let after = Self.info(saved) else { return .success("Evento actualizado y comprobado.") }
+        let note = recurring ? " Solo se cambió esta ocurrencia; el resto de la serie no se tocó." : ""
+        return .success("Evento actualizado y comprobado releyéndolo del calendario: antes \(CalendarEventMatcher.describe(info, calendar: calendar)); ahora \(CalendarEventMatcher.describe(after, calendar: calendar)).\(note)")
+    }
+
+    private func deleteEvent(_ args: [String: String]) async -> ToolOutcome {
+        let location = await locateEvent(args)
+        guard case .found(let event, let store, let info) = location else {
+            if case .blocked(let message, _) = location { return .failure(message) }
+            return .failure("No pude localizar el evento.")
+        }
+        if let blocked = modificationBlock(info) { return .failure(blocked) }
+        let baseID = event.eventIdentifier ?? ""
+        let recurring = event.hasRecurrenceRules
+        let start: Date = event.startDate
+        do {
+            try store.remove(event, span: .thisEvent, commit: true)
+        } catch {
+            Diagnostics.shared.log("calendario: error al eliminar evento: \(error.localizedDescription)")
+            return .failure("No pude eliminar «\(info.title)»: \(error.localizedDescription)")
+        }
+        // Comprobación real: con un almacén nuevo, el evento ya no debe existir.
+        if refetch(baseID: baseID, recurring: recurring, near: start) != nil {
+            Diagnostics.shared.log("calendario: tras eliminar, el evento sigue existiendo")
+            return .failure("Pedí eliminar «\(info.title)», pero el evento sigue en el calendario; no puedo confirmar que se haya borrado.")
+        }
+        ledger.remove(id: info.id)
+        let note = recurring ? " Solo se eliminó esta ocurrencia; el resto de la serie sigue." : ""
+        return .success("Evento eliminado y comprobado (ya no aparece en el calendario): \(CalendarEventMatcher.describe(info, calendar: Calendar.current)).\(note)")
     }
 
     // MARK: Lectura de calendario y contactos (solo si el usuario lo activó en Privacidad; ese interruptor ES la autorización)
@@ -346,8 +557,22 @@ final class DeviceToolExecutor: ToolExecutor {
                 break     // autorizado o acceso limitado (iOS 18): se lee lo que el usuario compartió
             }
             let keys: [CNKeyDescriptor] = [CNContactGivenNameKey as CNKeyDescriptor, CNContactFamilyNameKey as CNKeyDescriptor,
-                                           CNContactEmailAddressesKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor]
-            let matches = try store.unifiedContacts(matching: CNContact.predicateForContacts(matchingName: name), keysToFetch: keys)
+                                           CNContactEmailAddressesKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor,
+                                           CNContactNicknameKey as CNKeyDescriptor, CNContactOrganizationNameKey as CNKeyDescriptor]
+            var matches = try store.unifiedContacts(matching: CNContact.predicateForContacts(matchingName: name), keysToFetch: keys)
+            if matches.isEmpty {
+                // Sin coincidencia por nombre: se prueba con el apodo («Jefe») y la empresa, que muchos guardan en vez del nombre.
+                let wanted = TextNormalizer.tokens(name).map(TextNormalizer.stem)
+                if !wanted.isEmpty {
+                    let request = CNContactFetchRequest(keysToFetch: keys)
+                    var scanned: [CNContact] = []
+                    try store.enumerateContacts(with: request) { contact, _ in
+                        let fields = [contact.nickname, contact.organizationName].map(TextNormalizer.fold).filter { !$0.isEmpty }
+                        if fields.contains(where: { field in wanted.allSatisfy { field.contains($0) } }) { scanned.append(contact) }
+                    }
+                    matches = scanned
+                }
+            }
             guard !matches.isEmpty else { return .success("No encontré contactos que coincidan con «\(name)».") }
             let lines = matches.prefix(5).map { contact -> String in
                 let full = [contact.givenName, contact.familyName].filter { !$0.isEmpty }.joined(separator: " ")
@@ -374,15 +599,29 @@ final class DeviceToolExecutor: ToolExecutor {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
     }
 
+    /// Muestra una VISTA PREVIA editable del borrador y espera a que el usuario decida (abrir en Correo, copiar o descartar).
+    /// Lo que se cuenta al modelo es lo que de verdad pasó: nunca «enviado» si el usuario no pulsó Enviar.
     private func composeEmail(_ args: [String: String]) async -> ToolOutcome {
-        var query = ["body=\(urlEncode(args["body"] ?? ""))"]
-        if let subject = args["subject"] { query.insert("subject=\(urlEncode(subject))", at: 0) }
-        let recipient = urlEncode(args["to"] ?? "", keep: "@+")
-        guard let url = URL(string: "mailto:\(recipient)?\(query.joined(separator: "&"))") else { return .failure("No pude construir el borrador.") }
-        let opened = await UIApplication.shared.open(url)
-        return opened
-            ? .success("Abrí Correo con un borrador listo. TODAVÍA NO SE ENVIÓ: el usuario debe revisarlo y pulsar Enviar.")
-            : .failure("No pude abrir Correo. ¿Hay una cuenta configurada en la app Correo?")
+        let content = MailDraftContent(to: args["to"] ?? "", subject: args["subject"] ?? "", body: args["body"] ?? "")
+        Diagnostics.shared.log("correo: vista previa del borrador (\(content.to.isEmpty ? "sin destinatario" : "con destinatario"), \(content.body.count) caracteres)")
+        let result = await mailDrafts.present(content)
+        Diagnostics.shared.log("correo: resultado = \(result)")
+        switch result {
+        case .composerSent:
+            return .success("El usuario envió el correo desde el compositor de Correo (él pulsó Enviar).")
+        case .composerSaved:
+            return .success("El usuario guardó el borrador en Correo. NO se envió.")
+        case .openedExternal:
+            return .success("Abrí la app de correo con el borrador listo. TODAVÍA NO SE ENVIÓ: el usuario debe revisarlo y pulsar Enviar; no puedo saber si lo hizo.")
+        case .copied:
+            return .success("El usuario copió el borrador al portapapeles. NO se envió nada.")
+        case .composerCancelled:
+            return .failure("El usuario cerró el compositor sin enviar ni guardar el correo. No se envió nada.")
+        case .composerFailed(let reason):
+            return .failure("Correo no pudo preparar el mensaje: \(reason). No se envió nada.")
+        case .discarded:
+            return .failure("El usuario descartó el borrador; no se abrió el correo ni se envió nada.")
+        }
     }
 
     private func composeMessage(_ args: [String: String]) async -> ToolOutcome {

@@ -496,3 +496,64 @@ final class RecognitionDiagnosticsTests: XCTestCase {
         XCTAssertEqual(back, record)
     }
 }
+
+// MARK: Correo (borrador) y Whisper
+
+final class MailDraftAndWhisperTests: XCTestCase {
+    func testMailtoEncodesEverythingAndCannotInjectParameters() throws {
+        let draft = MailDraftContent(to: "Ana@Example.com", subject: "Hola & adiós", body: "Línea 1\nLínea 2 & cc=otro@x.com?bcc=z")
+        let url = try XCTUnwrap(draft.mailtoURL)
+        XCTAssertTrue(url.absoluteString.hasPrefix("mailto:ana@example.com?"))
+        XCTAssertFalse(url.absoluteString.contains(" "))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.queryItems?.map(\.name), ["subject", "body"], "El texto del usuario no puede añadir parámetros como cc o bcc")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "body" })?.value, draft.body)
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "subject" })?.value, "Hola & adiós")
+    }
+
+    func testADraftWithoutRecipientIsValidAndABadRecipientIsReported() throws {
+        let open = MailDraftContent(subject: "Llegaré tarde", body: "Hola, mañana llegaré tarde.")
+        XCTAssertNil(open.recipientProblem, "Sin destinatario el usuario lo añade en Correo")
+        XCTAssertTrue(try XCTUnwrap(open.mailtoURL).absoluteString.hasPrefix("mailto:?"))
+        XCTAssertNotNil(MailDraftContent(to: "mi jefe", body: "x").recipientProblem)
+        XCTAssertNil(MailDraftContent(to: "jefe arroba empresa punto com", body: "x").recipientProblem, "Una dirección dictada se entiende")
+    }
+
+    func testPlainTextKeepsTheWholeDraftForCopying() {
+        let draft = MailDraftContent(to: "ana@example.com", subject: "Hoy", body: "Hola Ana,\n\nLlego a las 9.")
+        XCTAssertEqual(draft.plainText, "Para: ana@example.com\nAsunto: Hoy\n\nHola Ana,\n\nLlego a las 9.")
+        XCTAssertEqual(MailDraftContent(body: "Solo cuerpo").plainText, "Solo cuerpo")
+    }
+
+    func testWhisperMultipartContainsTheExpectedPartsAndTheAudio() {
+        let audio = Data("RIFFxxxxWAVEdatos".utf8)
+        let body = GroqWhisper.multipartBody(boundary: "BND", audio: audio, prompt: "Wendy Ramírez, Kisameyguy.")
+        let text = String(decoding: body, as: UTF8.self)
+        XCTAssertTrue(text.contains("name=\"model\"\r\n\r\nwhisper-large-v3-turbo"))
+        XCTAssertTrue(text.contains("name=\"language\"\r\n\r\nes"))
+        XCTAssertTrue(text.contains("name=\"prompt\"\r\n\r\nWendy Ramírez, Kisameyguy."))
+        XCTAssertTrue(text.contains("name=\"file\"; filename=\"dictado.wav\"\r\nContent-Type: audio/wav\r\n\r\nRIFFxxxxWAVEdatos"))
+        XCTAssertTrue(text.hasSuffix("\r\n--BND--\r\n"))
+        XCTAssertEqual(GroqWhisper.contentType(boundary: "BND"), "multipart/form-data; boundary=BND")
+        let noPrompt = String(decoding: GroqWhisper.multipartBody(boundary: "B", audio: audio, prompt: nil), as: UTF8.self)
+        XCTAssertFalse(noPrompt.contains("name=\"prompt\""))
+        XCTAssertTrue(GroqWhisper.endpoint.hasPrefix("https://"), "Solo HTTPS")
+    }
+
+    func testWhisperResponsesAndErrors() {
+        XCTAssertEqual(GroqWhisper.parseTranscript(Data(#"{"text":"  hola mundo "}"#.utf8)), "hola mundo")
+        XCTAssertNil(GroqWhisper.parseTranscript(Data(#"{"text":""}"#.utf8)))
+        XCTAssertNil(GroqWhisper.parseTranscript(Data("basura".utf8)))
+        XCTAssertTrue(GroqWhisper.errorMessage(status: 401, body: "").contains("rechazó la clave"))
+        XCTAssertTrue(GroqWhisper.errorMessage(status: 413, body: "").contains("largo"))
+        XCTAssertTrue(GroqWhisper.errorMessage(status: 429, body: "").contains("límite"))
+        XCTAssertTrue(GroqWhisper.errorMessage(status: 503, body: "").contains("problemas"))
+    }
+
+    func testWhisperPromptIsShortAndOptional() {
+        XCTAssertEqual(GroqWhisper.prompt(from: ["Wendy Ramírez", " ", "Kisameyguy"]), "Wendy Ramírez, Kisameyguy.")
+        XCTAssertNil(GroqWhisper.prompt(from: []))
+        let many = (0..<100).map { "Nombre\($0)" }
+        XCTAssertLessThanOrEqual(GroqWhisper.prompt(from: many)?.count ?? 0, 402)
+    }
+}

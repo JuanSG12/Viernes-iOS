@@ -11,6 +11,12 @@ enum ToolPhrases {
         case "list_reminders": return "Revisando tus recordatorios…"
         case "complete_reminder": return "Completando el recordatorio…"
         case "create_event": return "Añadiendo al calendario…"
+        case "update_event": return "Modificando el evento…"
+        case "delete_event": return "Buscando el evento…"
+        case "compose_email": return "Preparando el borrador…"
+        case "compose_message": return "Preparando el mensaje…"
+        case "find_contact": return "Buscando en tus contactos…"
+        case "list_events": return "Revisando tu calendario…"
         case "open_app": return "Abriendo la app…"
         case "open_url": return "Abriendo el enlace…"
         case "run_shortcut": return "Ejecutando el atajo…"
@@ -25,7 +31,11 @@ enum ToolPhrases {
         switch tool {
         case "get_weather": return "cloud.sun"
         case "create_reminder", "list_reminders", "complete_reminder": return "checklist"
-        case "create_event": return "calendar"
+        case "create_event", "update_event", "list_events": return "calendar"
+        case "delete_event": return "calendar.badge.minus"
+        case "compose_email": return "envelope"
+        case "compose_message": return "message"
+        case "find_contact": return "person.crop.circle"
         case "open_app", "open_url": return "arrow.up.forward.app"
         case "run_shortcut": return "bolt"
         case "ask_claude": return "sparkles"
@@ -51,7 +61,9 @@ struct ConversationView: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(model.messages) { message in
                         if message.role == .user {
-                            UserBubble(text: message.text).id(message.id)
+                            UserBubble(text: message.text,
+                                       onCorrect: (message.id == model.lastVoiceMessageID && model.generationIdle) ? { model.correctLastMessage() } : nil)
+                                .id(message.id)
                         } else {
                             AssistantMessage(message: message, isLast: message.id == lastAssistantID && model.generationIdle)
                                 .id(message.id)
@@ -64,7 +76,7 @@ struct ConversationView: View {
                     if !model.streamingText.isEmpty {
                         StreamingMessage(text: model.streamingText).id("stream")
                     } else if model.coreState == .thinking {
-                        ThinkingIndicator(label: model.activeTool.map(ToolPhrases.running) ?? "Pensando…").id("thinking")
+                        ThinkingIndicator(label: model.engineWaitNote ?? model.busyNote ?? model.activeTool.map(ToolPhrases.running) ?? "Pensando…").id("thinking")
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -88,17 +100,27 @@ struct ConversationView: View {
 struct UserBubble: View {
     let text: String
     var dim: Bool = false
+    /// Si existe, aparece un lápiz para corregir lo que se transcribió (solo en la última frase dictada).
+    var onCorrect: (() -> Void)?
 
     var body: some View {
-        Text(text)
-            .font(Theme.body(15))
-            .foregroundStyle(Theme.textPrimary)
-            .multilineTextAlignment(.leading)
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .chromeSurface(tint: Theme.chrome, radius: 18)
-            .opacity(dim ? 0.65 : 1)
-            .padding(.leading, 56)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+        HStack(spacing: 8) {
+            if let onCorrect = onCorrect {
+                Button(action: onCorrect) { Image(systemName: "pencil") }
+                    .buttonStyle(ChromeIconButtonStyle(size: 30))
+                    .accessibilityLabel("Corregir lo que dije")
+                    .accessibilityIdentifier("correct-message")
+            }
+            Text(text)
+                .font(Theme.body(15))
+                .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .chromeSurface(tint: Theme.chrome, radius: 18)
+                .opacity(dim ? 0.65 : 1)
+        }
+        .padding(.leading, 56)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
