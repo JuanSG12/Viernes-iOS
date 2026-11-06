@@ -2,6 +2,16 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.5.1] — Agente más robusto y núcleo sin cuadrados negros (pendiente de probar en el iPhone)
+
+Reporte real (iPhone, IPA #4): al pedir «agendar una reunión» o «ver mi agenda» salía «El modelo no devolvió texto», y el núcleo mostraba cuadrados negros al moverse.
+
+- **Respuestas vacías**: causas halladas por lectura del código, no confirmadas en el dispositivo: (1) el flujo de la nube ignoraba errores del proveedor enviados dentro del flujo (Groq corta con `tool_use_failed` cuando el modelo escribe una llamada a función a su manera), (2) el guardián de fugas borraba un JSON de llamada escrito sin las etiquetas `<tool>`, y (3) la respuesta vacía se mostraba como error sin reintentar. Ahora: `ToolCallRecovery` rescata llamadas en JSON suelto, `<function=…>` y `functions.nombre {…}` (solo herramientas del catálogo, con la misma validación y confirmaciones); `tool_use_failed` se convierte en una llamada válida; `finish_reason: length` se explica; una respuesta vacía se reintenta hasta 2 veces; y si todo lo intentado queda oculto (faltaban datos) se responde un mensaje neutro en vez de una burbuja en blanco. El prompt fija un único formato de llamada y la conversión de horas («3:30 de la tarde» = 15:30).
+- **Núcleo 3D**: se retira el bloom HDR (las capturas con bloom mostraban cuadrados negros; sin bloom salen limpias) y el resplandor pasa a una capa 2D (`CoreGlow`). La causa exacta (probablemente valores inválidos en los reflejos del metal que el desenfoque del bloom esparce) no está demostrada; el criterio fue empírico (capturas con y sin bloom).
+- Pruebas nuevas (`ToolRecoveryTests`): rescate de llamadas, errores dentro del flujo, reintento de vacíos, sin burbuja en blanco, sin repetir una llamada copiada por el modelo.
+- `static-check.ps1` entiende cadenas crudas de Swift (`#"…"#`).
+- **Sin verificar**: nada de esto está probado con Groq real ni en el iPhone; el CI solo compila y ejecuta pruebas con un modelo simulado.
+
 ## [0.5.0] — Núcleo 3D y pantalla principal según la referencia (sin verificar en pantalla)
 
 El núcleo 2D (Canvas) se leía como una ilustración vectorial. Se sustituye por un objeto tridimensional real. Ver **CORE_VISUAL.md** (decisión técnica, fidelidad frente a la referencia y lo que no se reproduce).

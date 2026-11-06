@@ -74,14 +74,15 @@ struct ViernesCoreVisual: View {
                     CoreSceneView(
                         input: CoreSceneInput(state: state, level: level, pulse: pulse.timeIntervalSinceReferenceDate, calm: reduceMotion),
                         paused: scenePhase != .active)
-                    // Partículas y red de herramientas: capa 2D transparente ENCIMA de la escena 3D. Dentro de la escena, la
-                    // geometría pequeña añadida provocaba un cuadrado negro con el bloom HDR (visto en las capturas del simulador).
+                    // Resplandor, partículas y red de herramientas: capas 2D transparentes ENCIMA de la escena 3D (el bloom HDR de
+                    // SceneKit se retiró: dejaba cuadrados negros).
                     if !Self.overlayDisabledForQA {
+                        CoreGlow(state: state, paused: scenePhase != .active || reduceMotion)
                         CoreEffectsOverlay(state: state, paused: scenePhase != .active || reduceMotion)
                     }
                 }
                     .mask(
-                        // La escena es opaca (el bloom HDR no admite fondo transparente): el borde se funde con el fondo de la app.
+                        // La escena es opaca (gris casi negro): el borde se funde con el fondo de la app.
                         GeometryReader { proxy in
                             RadialGradient(stops: [
                                 .init(color: .black, location: 0.0), .init(color: .black, location: 0.60), .init(color: .clear, location: 1.0)
@@ -122,6 +123,56 @@ private struct CoreSceneView: UIViewRepresentable {
         context.coordinator.update(input)
         view.isPlaying = !paused
         view.preferredFramesPerSecond = (input.state == .idle || input.state == .offline) ? 20 : 60
+    }
+}
+
+/// Resplandor 2D del núcleo (sustituye al bloom): halo naranja que respira según el estado y un punto blanco-cálido en el centro.
+/// Degradados radiales sencillos con mezcla normal; solo anima (a 20 fps) cuando el núcleo está activo.
+private struct CoreGlow: View {
+    let state: CoreVisualState
+    let paused: Bool
+
+    private var tint: Color {
+        switch state {
+        case .error: return Color(red: 1.0, green: 0.27, blue: 0.36)
+        case .offline: return Color(red: 0.55, green: 0.58, blue: 0.64)
+        case .thinking: return Theme.amber
+        default: return Theme.accent
+        }
+    }
+
+    private var strength: Double {
+        switch state {
+        case .idle: return 0.08
+        case .listening: return 0.12
+        case .speaking: return 0.14
+        case .thinking: return 0.16
+        case .executing: return 0.20
+        case .error: return 0.16
+        case .offline: return 0.03
+        }
+    }
+
+    var body: some View {
+        let animated = state != .idle && state != .offline
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: paused || !animated)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            let rate: Double = (state == .thinking || state == .executing) ? 3.0 : 1.4
+            let pulse: Double = animated ? 1 + 0.14 * sin(time * rate) : 1
+            GeometryReader { proxy in
+                let side = min(proxy.size.width, proxy.size.height)
+                ZStack {
+                    RadialGradient(
+                        colors: [tint.opacity(strength * pulse), tint.opacity(strength * 0.35 * pulse), .clear],
+                        center: .center, startRadius: 0, endRadius: side * 0.46)
+                    RadialGradient(
+                        colors: [Color(red: 1.0, green: 0.92, blue: 0.75).opacity(min(0.9, strength * 1.8 * pulse)), .clear],
+                        center: .center, startRadius: 0, endRadius: side * 0.07)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

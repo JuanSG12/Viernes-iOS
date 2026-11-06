@@ -17,7 +17,7 @@ struct CoreSceneInput {
 }
 
 /// Escena SceneKit del núcleo: dos anillos de cromo ENTRELAZADOS (como eslabones, sin atravesarse), un tercer anillo orbital,
-/// tiras incandescentes, una chispa central que ilumina el metal desde dentro y bloom para el resplandor.
+/// tiras incandescentes, una chispa central que ilumina el metal desde dentro (el resplandor es una capa 2D, sin bloom).
 final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked Sendable {
     let scene = SCNScene()
     let cameraNode = SCNNode()
@@ -50,11 +50,6 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
     private var deform: Float = 0
     private var lastTime: TimeInterval = 0
 
-    /// SOLO capturas del CI (`--uitest --uitest-no-bloom`): apaga el bloom para saber si los cuadrados negros nacen en él.
-    private static let bloomOffForQA: Bool = {
-        let arguments = ProcessInfo.processInfo.arguments
-        return arguments.contains("--uitest") && arguments.contains("--uitest-no-bloom")
-    }()
 
     private static let linkRadius: Float = 0.80
     private static let linkOffset: Float = 0.40
@@ -182,16 +177,16 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         warm.eulerAngles = SCNVector3(0.8, 2.4, 0)
         scene.rootNode.addChildNode(warm)
 
-        // Cámara con bloom (resplandor de lo incandescente) y viñeta suave.
+        // HDR con compresión tonal (da el contraste del cromo) pero SIN bloom: el bloom esparcía en CUADRADOS NEGROS algún píxel
+        // inválido de los reflejos metálicos (visto en el simulador y en un iPhone real, solo con el núcleo en movimiento; sin
+        // bloom las capturas salen limpias). El resplandor lo pone `CoreGlow` (2D) en `ViernesCoreVisual`.
         camera.fieldOfView = 30
         camera.zNear = 0.1
         camera.zFar = 30
         camera.wantsHDR = true
         camera.wantsExposureAdaptation = false
         camera.exposureOffset = -0.15
-        camera.bloomIntensity = 0.9
-        camera.bloomThreshold = 0.7
-        camera.bloomBlurRadius = 14
+        camera.bloomIntensity = 0
         camera.vignettingIntensity = 0.55
         camera.vignettingPower = 1.4
         cameraNode.camera = camera
@@ -283,6 +278,5 @@ final class CoreSceneController: NSObject, SCNSceneRendererDelegate, @unchecked 
         flareNode.opacity = CGFloat(min(0.5, 0.10 + 0.4 * energy))
         let flareScale: Float = 0.5 + 0.45 * energy
         flareNode.scale = SCNVector3(flareScale, flareScale, flareScale)
-        camera.bloomIntensity = Self.bloomOffForQA ? 0 : CGFloat(0.4 + 0.6 * energy)
     }
 }

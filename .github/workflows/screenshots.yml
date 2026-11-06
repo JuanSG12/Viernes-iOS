@@ -75,8 +75,7 @@ jobs:
           shoot home-thinking --uitest-3d --uitest-core-state=thinking
           shoot home-executing --uitest-3d --uitest-core-state=executing
           shoot home-error --uitest-3d --uitest-core-state=error
-          shoot home-thinking-nobloom --uitest-3d --uitest-core-state=thinking --uitest-no-bloom
-          shoot home-executing-nobloom --uitest-3d --uitest-core-state=executing --uitest-no-bloom
+          shoot home-speaking --uitest-3d --uitest-core-state=speaking
           shoot home-thinking-bare --uitest-3d --uitest-core-state=thinking --uitest-no-effects
           shoot home-executing-bare --uitest-3d --uitest-core-state=executing --uitest-no-effects
           shoot home-fallback-2d --uitest-core-state=idle

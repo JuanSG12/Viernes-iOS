@@ -6,7 +6,7 @@ Estado honesto: **escrito desde Windows, sin haberlo visto en pantalla**. Compil
 
 | Opción | Fidelidad | Rendimiento | Mantenimiento | iOS 18+ | Veredicto |
 |---|---|---|---|---|---|
-| **SceneKit** + geometría por código | Alta para metal: PBR (metalness/roughness), mapa de entorno, luces, **bloom HDR** en la cámara | Muy buena en un 14 Pro Max (≈6 000 vértices por anillo) | API estable y conocida; la geometría son arrays de vértices, independientes del motor | Sí | **Elegida** |
+| **SceneKit** + geometría por código | Alta para metal: PBR (metalness/roughness), mapa de entorno, luces, cámara HDR con compresión tonal | Muy buena en un 14 Pro Max (≈6 000 vértices por anillo) | API estable y conocida; la geometría son arrays de vértices, independientes del motor | Sí | **Elegida** |
 | RealityKit (`RealityView`) | Alta (PBR, IBL) | Buena | Moderno y respaldado por Apple, pero el postproceso (bloom) es limitado y exige recursos de entorno asíncronos; más difícil de verificar sin dispositivo | `RealityView` en iOS 18 | Descartada por ahora |
 | Metal propio (ray-marching de SDF) | Potencialmente la mejor (reflejos y volumetría reales) | Costosa en batería | Ingeniería pesada, imposible de verificar desde Windows | Sí | Descartada: riesgo desproporcionado |
 | Modelo creado en Blender | El modelado puede ser excelente | — | Necesita Blender y un activo binario; igualmente hay que **renderizarlo** con SceneKit o RealityKit, así que no es una alternativa de motor | — | No viable aquí; la malla procedural cumple la misma función |
@@ -19,7 +19,7 @@ Estado honesto: **escrito desde Windows, sin haberlo visto en pantalla**. Compil
 - **Geometría** (`BandRingMesh`): bandas de sección elíptica con torsión y ondulación del radio; **dos eslabones entrelazados** (radio R, centros separados R/2, planos perpendiculares: se enlazan sin atravesarse) y un anillo orbital exterior más fino.
 - **Materiales**: PBR metálico (diffuse oscuro, `metalness = 1`, `roughness` 0,12–0,24) y tiras emisivas naranja («metal incandescente») dentro de cada anillo.
 - **Iluminación**: mapa de entorno **procedural** de estudio (`CoreEnvironment.studioMap`: negro con cajas de luz blancas y una franja naranja, es lo que refleja el cromo), luz clave fría, contraluz cálido y una **luz omni naranja en la chispa central** que ilumina el metal desde dentro.
-- **Resplandor**: bloom HDR de la cámara + destello en cruz (plano que mira a la cámara, mezcla aditiva) + viñeta.
+- **Resplandor**: destello en cruz (plano que mira a la cámara, mezcla aditiva) + halo 2D (`CoreGlow`) + viñeta. **Sin bloom**: con el bloom HDR de SceneKit aparecían cuadrados negros (simulador e iPhone real) cuando el núcleo se movía; sin bloom las capturas salen limpias. La causa exacta no está demostrada.
 - **Animación por estado real** (parámetros suavizados, sin saltos): reposo (casi quieto, 20 fps), escucha (deformación y energía con el nivel del micrófono), pensamiento (anillo exterior se cierra y entran partículas en espiral), habla (pulso y escala con cada palabra), **ejecución** (nodos que orbitan unidos al centro por líneas que pulsan; solo mientras una herramienta se ejecuta de verdad), error (rojo con parpadeo), sin cerebro (apagado).
 - **Rendimiento**: 20 fps en reposo y 60 activo; se pausa con la app en segundo plano; respeta «Reducir movimiento».
 - **Respaldo 2D** (`ChromeCoreView`): si no hay Metal, si el usuario activa «efectos reducidos» y en las pruebas de UI.
@@ -36,7 +36,7 @@ Reproducido: fondo negro con barridos de cromo y vetas naranja (`ChromeBackdrop`
 - **Fondo**: los «barridos» son trazos curvos borrosos, no formas 3D pulidas.
 - **Foto de la ciudad** de la tarjeta de clima: no hay imágenes; la tarjeta usa símbolos del sistema y degradados.
 - **Controles de teclado y altavoz**: la referencia no los muestra; se mantienen, pequeños, a los lados de la cápsula porque son funciones reales.
-- **Núcleo con fondo opaco**: el bloom HDR de SceneKit no admite fondo transparente, así que la escena se pinta opaca (gris casi negro) y su borde se difumina con una máscara radial; puede notarse un leve cambio de tono con el fondo de la app.
+- **Núcleo con fondo opaco**: la cámara HDR de SceneKit no admite fondo transparente, así que la escena se pinta opaca (gris casi negro) y su borde se difumina con una máscara radial; puede notarse un leve cambio de tono con el fondo de la app.
 
 ## 4. Verificación
 
@@ -46,4 +46,4 @@ Reproducido: fondo negro con barridos de cromo y vetas naranja (`ChromeBackdrop`
 
 ## 5. Por probar en el iPhone
 
-Aspecto real del metal y del bloom; que los dos anillos se vean entrelazados desde varios ángulos; fluidez a 60 fps y batería; que la máscara radial no deje un cuadrado visible; que el menú «Más» responda; contraste y legibilidad con luz solar.
+Aspecto real del metal y del resplandor 2D; **que ya no aparezcan cuadrados negros al moverse el núcleo** (el CI solo lo comprobó en capturas del simulador); que los dos anillos se vean entrelazados desde varios ángulos; fluidez a 60 fps y batería; que la máscara radial no deje un cuadrado visible; que el menú «Más» responda; contraste y legibilidad con luz solar.
