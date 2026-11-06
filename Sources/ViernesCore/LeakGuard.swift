@@ -13,7 +13,7 @@ public final class LeakGuard {
     private var atLineStart = true
 
     /// Se puede aparecer en cualquier posición del texto.
-    private static let anywhere: [String] = ["[RESULTADO_HERRAMIENTA]", "{\"name\":"]
+    private static let anywhere: [String] = ["[RESULTADO_HERRAMIENTA]", "{\"name\":", "<function=", "<tool_call>"]
     /// Solo al principio de una línea: eco de resultados («- get_weather: ÉXITO…»).
     private static let lineStart: [String] = ToolCatalog.all.map { "- \($0.name):" }
 

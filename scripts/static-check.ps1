@@ -31,6 +31,26 @@ function Test-SwiftBalance([string]$text) {
             if ($c -eq '/' -and $i + 1 -lt $n -and $text[$i+1] -eq '*') { $blockDepth++; $i += 2; continue }
             $i++; continue
         }
+        if ($inString -and $rawHashes -gt 0) {
+            # Cadena CRUDA (#"…"#): la barra invertida es literal; solo \#( interpola y solo «"» + los # de apertura la cierra.
+            $hashRun = $true
+            for ($k = 1; $k -le $rawHashes; $k++) { if ($i + $k -ge $n -or $text[$i+$k] -ne '#') { $hashRun = $false; break } }
+            if ($c -eq '\' -and $hashRun -and $i + $rawHashes + 1 -lt $n -and $text[$i+$rawHashes+1] -eq '(') {
+                $strStack.Push(@{ multi = $multi; raw = $rawHashes; depth = $stack.Count })
+                $stack.Push('('); $inString = $false; $i += $rawHashes + 2; continue
+            }
+            if ($c -eq '"') {
+                $closes = $true
+                $offset = 1
+                if ($multi) { $offset = 3; if (-not ($i + 2 -lt $n -and $text[$i+1] -eq '"' -and $text[$i+2] -eq '"')) { $closes = $false } }
+                if ($closes) {
+                    for ($k = 0; $k -lt $rawHashes; $k++) { if ($i + $offset + $k -ge $n -or $text[$i+$offset+$k] -ne '#') { $closes = $false; break } }
+                }
+                if ($closes) { $inString = $false; $i += $offset + $rawHashes; $rawHashes = 0; continue }
+            }
+            if (-not $multi -and $c -eq "`n") { return "línea ${line}: cadena sin cerrar" }
+            $i++; continue
+        }
         if ($inString) {
             if ($c -eq '\') {
                 if ($i + 1 -lt $n -and $text[$i+1] -eq '(') {
@@ -51,6 +71,15 @@ function Test-SwiftBalance([string]$text) {
         # código normal
         if ($c -eq '/' -and $i + 1 -lt $n -and $text[$i+1] -eq '/') { while ($i -lt $n -and $text[$i] -ne "`n") { $i++ }; continue }
         if ($c -eq '/' -and $i + 1 -lt $n -and $text[$i+1] -eq '*') { $blockDepth = 1; $i += 2; continue }
+        if ($c -eq '#') {
+            $j = $i
+            while ($j -lt $n -and $text[$j] -eq '#') { $j++ }
+            if ($j -lt $n -and $text[$j] -eq '"') {
+                $rawHashes = $j - $i
+                if ($j + 2 -lt $n -and $text[$j+1] -eq '"' -and $text[$j+2] -eq '"') { $inString = $true; $multi = $true; $i = $j + 3; continue }
+                $inString = $true; $multi = $false; $i = $j + 1; continue
+            }
+        }
         if ($c -eq '"') {
             if ($i + 2 -lt $n -and $text[$i+1] -eq '"' -and $text[$i+2] -eq '"') { $inString = $true; $multi = $true; $i += 3; continue }
             $inString = $true; $multi = $false; $i++; continue
@@ -63,6 +92,7 @@ function Test-SwiftBalance([string]$text) {
             # ¿cerró una interpolación?
             if ($c -eq ')' -and $strStack.Count -gt 0 -and $stack.Count -eq $strStack.Peek().depth) {
                 $ctx = $strStack.Pop(); $inString = $true; $multi = $ctx.multi
+                $rawHashes = if ($ctx.ContainsKey('raw')) { $ctx.raw } else { 0 }
             }
             $i++; continue
         }

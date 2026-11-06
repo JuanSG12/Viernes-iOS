@@ -61,20 +61,55 @@ final class CloudEngine: LanguageModelEngine, @unchecked Sendable {
                         var body = ""
                         for try await line in bytes.lines {
                             body += line
-                            if body.count > 2_000 { break }
+                            if body.count > 8_000 { break }
+                        }
+                        // El mismo «tool_use_failed» también puede llegar como error HTTP 400: se rescata igual.
+                        if http.statusCode == 400, let failed = OpenAIChatProtocol.failedGeneration(inBody: body) {
+                            let calls = ToolCallRecovery.extract(from: failed)
+                            if !calls.isEmpty {
+                                for call in calls { continuation.yield("\(Persona.toolOpen)\(call)\(Persona.toolClose)\n") }
+                                continuation.finish()
+                                return
+                            }
                         }
                         throw EngineError.generationFailed(OpenAIChatProtocol.errorMessage(
                             status: http.statusCode, body: body, provider: self.preset.displayName, model: self.settings.model))
                     }
+                    var yielded = false
+                    var finishReason: String?
+                    /// Respuesta sin una sola palabra porque el modelo agotó su límite pensando: se dice, en vez de dejarla vacía.
+                    func finishStream() throws {
+                        if !yielded, finishReason == "length" {
+                            throw EngineError.generationFailed("El modelo agotó su espacio de respuesta antes de escribir. Inténtalo de nuevo con un mensaje más corto.")
+                        }
+                    }
                     for try await line in bytes.lines {
                         switch OpenAIChatProtocol.parseStreamLine(line) {
-                        case .delta(let text): continuation.yield(text)
+                        case .delta(let text):
+                            yielded = true
+                            continuation.yield(text)
+                        case .finish(let reason):
+                            finishReason = reason
+                        case .providerError(let message, let failedGeneration):
+                            // Groq corta con «tool_use_failed» cuando el modelo escribe una llamada a función a su manera.
+                            // Lo que quiso escribir llega en `failed_generation`: se rescata como llamada válida.
+                            if !yielded, let failed = failedGeneration {
+                                let calls = ToolCallRecovery.extract(from: failed)
+                                if !calls.isEmpty {
+                                    for call in calls { continuation.yield("\(Persona.toolOpen)\(call)\(Persona.toolClose)\n") }
+                                    continuation.finish()
+                                    return
+                                }
+                            }
+                            throw EngineError.generationFailed("\(self.preset.displayName): \(message)")
                         case .done:
+                            try finishStream()
                             continuation.finish()
                             return
                         case .ignore: continue
                         }
                     }
+                    try finishStream()
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: EngineError.cancelled)

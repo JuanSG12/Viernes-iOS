@@ -75,6 +75,11 @@ extension AppSettings {
 public enum OpenAIChatProtocol {
     public enum StreamChunk: Equatable, Sendable {
         case delta(String)
+        /// Motivo de fin de la respuesta (`stop`, `length`…). Solo informativo.
+        case finish(String)
+        /// El proveedor devolvió un error DENTRO del flujo (HTTP 200). Groq lo hace cuando el modelo intenta una llamada a función
+        /// nativa: entonces `failedGeneration` trae lo que el modelo quiso escribir.
+        case providerError(message: String, failedGeneration: String?)
         case done
         case ignore
     }
@@ -116,12 +121,24 @@ public enum OpenAIChatProtocol {
         let payload = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
         if payload == "[DONE]" { return .done }
         guard let data = payload.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = object["choices"] as? [[String: Any]],
-              let delta = choices.first?["delta"] as? [String: Any],
-              let content = delta["content"] as? String, !content.isEmpty
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return .ignore }
-        return .delta(content)
+
+        if let error = object["error"] as? [String: Any] {
+            let message = (error["message"] as? String).map { String($0.prefix(200)) } ?? "error del proveedor"
+            let failed = (error["failed_generation"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(4_000)) }
+            return .providerError(message: message, failedGeneration: failed)
+        }
+        if let error = object["error"] as? String, !error.isEmpty {
+            return .providerError(message: String(error.prefix(200)), failedGeneration: nil)
+        }
+
+        guard let choices = object["choices"] as? [[String: Any]], let first = choices.first else { return .ignore }
+        if let delta = first["delta"] as? [String: Any], let content = delta["content"] as? String, !content.isEmpty {
+            return .delta(content)
+        }
+        if let reason = first["finish_reason"] as? String, !reason.isEmpty { return .finish(reason) }
+        return .ignore
     }
 
     /// Mensaje en español para un error HTTP. Nunca incluye la clave.
@@ -139,6 +156,15 @@ public enum OpenAIChatProtocol {
         default:
             return "\(provider) respondió con error \(status)" + (detail.map { ": \($0)" } ?? ".")
         }
+    }
+
+    /// Lo que el modelo intentó escribir cuando el proveedor rechazó una llamada a función (`error.failed_generation`).
+    public static func failedGeneration(inBody body: String) -> String? {
+        guard let data = body.data(using: .utf8), let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        let object: [String: Any]?
+        if let dict = json as? [String: Any] { object = dict } else { object = (json as? [[String: Any]])?.first }
+        guard let text = (object?["error"] as? [String: Any])?["failed_generation"] as? String, !text.isEmpty else { return nil }
+        return String(text.prefix(4_000))
     }
 
     static func providerDetail(_ body: String) -> String? {

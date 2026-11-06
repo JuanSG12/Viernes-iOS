@@ -194,23 +194,44 @@ public enum ToolCatalog {
     public static func definition(named name: String) -> ToolDefinition? { all.first { $0.name == name } }
 }
 
-/// Extrae el JSON de `<tool>{...}</tool>` a una `ToolCall`.
+/// Extrae el JSON de `<tool>{...}</tool>` a una `ToolCall`. Tolera las variantes habituales de los modelos:
+/// `args` / `arguments` / `parameters`, argumentos como texto JSON y el envoltorio `{"function":{…}}` del estilo OpenAI.
 public enum ToolCallParser {
+    private static let argumentKeys = ["args", "arguments", "parameters", "input"]
+
     public static func parse(_ json: String) -> ToolCall? {
         guard let data = json.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let name = object["name"] as? String, !name.isEmpty
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
+        return call(from: object)
+    }
+
+    static func call(from original: [String: Any]) -> ToolCall? {
+        var object = original
+        if let inner = object["function"] as? [String: Any] { object = inner }
+        guard var name = object["name"] as? String else { return nil }
+        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.hasPrefix("functions.") { name = String(name.dropFirst("functions.".count)) }
+        guard !name.isEmpty else { return nil }
+
+        var raw: [String: Any] = [:]
+        for key in argumentKeys {
+            if let dictionary = object[key] as? [String: Any] { raw = dictionary; break }
+            if let text = object[key] as? String, let data = text.data(using: .utf8),
+               let dictionary = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { raw = dictionary; break }
+        }
+        return ToolCall(name: name, args: stringArguments(raw))
+    }
+
+    static func stringArguments(_ raw: [String: Any]) -> [String: String] {
         var args: [String: String] = [:]
-        if let raw = object["args"] as? [String: Any] {
-            for (key, value) in raw {
-                switch value {
-                case let string as String: args[key] = string
-                case let number as NSNumber: args[key] = number.stringValue
-                default: continue          // objetos anidados no se admiten
-                }
+        for (key, value) in raw {
+            switch value {
+            case let string as String: args[key] = string
+            case let number as NSNumber: args[key] = number.stringValue
+            default: continue          // objetos anidados no se admiten
             }
         }
-        return ToolCall(name: name, args: args)
+        return args
     }
 }

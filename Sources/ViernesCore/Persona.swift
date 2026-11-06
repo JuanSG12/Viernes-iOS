@@ -42,6 +42,13 @@ public enum Persona {
         """
     }
 
+    /// Se añade al prompt cuando el modelo devolvió una respuesta vacía y se le vuelve a pedir.
+    public static let emptyReplyNote = """
+        Aviso interno: tu respuesta anterior llegó vacía. Responde ahora al usuario con texto breve. Si necesitas una herramienta, \
+        escribe EXACTAMENTE \(toolOpen){"name":"nombre_herramienta","args":{…}}\(toolClose) en una línea y nada más; \
+        no uses otro formato de llamada. Si ya tienes un resultado, cuéntaselo con tus palabras.
+        """
+
     public static func systemPrompt(_ context: PersonaContext) -> String {
         var sections: [String] = []
 
@@ -97,8 +104,11 @@ public enum Persona {
             «recuérdame llevar los documentos mañana a las 8», «pregúntale a Claude…»), llama a la herramienta DE INMEDIATO, \
             sin preguntar si quiere que lo hagas: la app ya muestra su propia confirmación en las acciones que la necesitan \
             (enlaces, Atajos, Claude, borrar). Si falta un dato IMPRESCINDIBLE, pregunta únicamente por ese dato. Si el usuario \
-            da una fecha u hora relativa («mañana a las 8»), conviértela tú a ISO 8601 con la fecha actual de arriba. \
-            No inventes herramientas.
+            da una fecha u hora relativa («mañana a las 8»), conviértela tú a ISO 8601 con la fecha actual de arriba \
+            (en 24 horas: «3:30 de la tarde» es 15:30, «8 de la noche» es 20:00, «mediodía» es 12:00). \
+            Este es el ÚNICO formato de llamada válido: nunca escribas JSON suelto, «functions.», «<function=…>» ni otra sintaxis; \
+            sin las etiquetas \(toolOpen)…\(toolClose) la acción no se ejecuta. Nunca digas que consultaste, creaste o agendaste algo \
+            si no llamaste a la herramienta y recibiste su resultado. No inventes herramientas.
 
             Peticiones de varios pasos: encadena herramientas. Primero consulta lo necesario y, con los datos REALES del \
             resultado, actúa (p. ej. leer eventos y luego crear un recordatorio). Si dos consultas son independientes, \

@@ -114,16 +114,24 @@ public actor ConversationEngine {
             contextMemories = MemoryRetriever.context(query: trimmed, items: all, limit: config.memoryContextLimit, now: clock())
         }
 
-        let system = Persona.systemPrompt(PersonaContext(
+        let baseSystem = Persona.systemPrompt(PersonaContext(
             now: clock(), timeZone: config.timeZone, engine: engine.descriptor, memories: contextMemories,
             tools: availableTools(), claudeMode: config.claudeMode, spokenOutput: config.spokenOutput
         ))
+        var system = baseSystem
 
         var turns = Self.turns(from: Array(history.dropLast()), budget: config.historyCharBudget)
         turns.append(ChatTurn(role: .user, content: trimmed + firstUserSuffix))
 
         var displayText = ""
-        for round in 0..<max(1, config.maxToolRounds) {
+        var emptyRetries = 0
+        /// Llamadas ya ejecutadas en este mensaje: una llamada «rescatada» de un texto no se repite si el modelo la copia de vuelta.
+        var executedCalls = Set<String>()
+        let maxRounds = max(1, config.maxToolRounds)
+        var round = -1
+        while true {
+            round += 1
+            if round >= maxRounds { break }
             if Task.isCancelled { return }
             let filter = StreamingTagFilter(specs: [
                 .init(open: Persona.toolOpen, close: Persona.toolClose, capture: true),
@@ -132,11 +140,13 @@ public actor ConversationEngine {
             ])
             let leakGuard = LeakGuard()
             var roundVisible = ""
+            var rawRound = ""          // salida cruda del modelo (para rescatar llamadas en otro formato y para diagnosticar)
 
             do {
                 let request = GenerationRequest(system: system, turns: turns)
                 for try await delta in engine.generate(request) {
                     if Task.isCancelled { return }
+                    if rawRound.utf8.count < 20_000 { rawRound += delta }
                     var piece = leakGuard.feed(filter.feed(delta))
                     if roundVisible.isEmpty { piece = String(piece.drop(while: { $0.isWhitespace })) }
                     if !piece.isEmpty {
@@ -157,13 +167,32 @@ public actor ConversationEngine {
                 return
             }
 
-            let toolBlocks = filter.captured.filter { $0.open == Persona.toolOpen }
-            if toolBlocks.isEmpty && filter.unterminatedBlocks == 0 { break }
+            var toolContents = filter.captured.filter { $0.open == Persona.toolOpen }.map(\.content)
+            if toolContents.isEmpty && filter.unterminatedBlocks == 0 {
+                // Sin etiquetas <tool>: el modelo pudo escribir la llamada en su formato nativo (JSON suelto, <function=…>).
+                let rescued = ToolCallRecovery.extract(from: rawRound).filter { !executedCalls.contains($0) }
+                if !rescued.isEmpty {
+                    diagnose("llamada recuperada de un formato no estándar: \(String(rescued[0].prefix(120)))")
+                    toolContents = rescued
+                } else if roundVisible.isEmpty && emptyRetries < Self.maxEmptyRetries {
+                    // Respuesta vacía (solo razonamiento, o el proveedor cortó): se vuelve a pedir en vez de mostrar un error.
+                    emptyRetries += 1
+                    diagnose("respuesta vacía del modelo (reintento \(emptyRetries)); salida cruda: «\(String(rawRound.prefix(160)))»")
+                    system = baseSystem + "\n\n" + Persona.emptyReplyNote
+                    round -= 1
+                    continue
+                }
+            }
+            system = baseSystem
+            if toolContents.isEmpty && filter.unterminatedBlocks == 0 { break }
 
-            let executedBlocks = Array(toolBlocks.prefix(config.maxCallsPerRound))
+            let executedBlocks = Array(toolContents.prefix(config.maxCallsPerRound))
             var records: [ActionRecord] = await executeRound(executedBlocks, out)
             if Task.isCancelled { return }
-            if toolBlocks.isEmpty && filter.unterminatedBlocks > 0 && roundVisible.isEmpty {
+            for content in executedBlocks {
+                if let call = ToolCallParser.parse(content) { executedCalls.insert(ToolCallRecovery.canonicalJSON(call)) }
+            }
+            if toolContents.isEmpty && filter.unterminatedBlocks > 0 && roundVisible.isEmpty {
                 diagnose("respuesta del modelo truncada dentro de una llamada de herramienta")
                 records.append(ActionRecord(tool: "desconocida", summary: "Respuesta truncada",
                                             outcome: .failed("La respuesta del modelo se cortó."), date: clock(), showToUser: false))
@@ -171,25 +200,40 @@ public actor ConversationEngine {
             for record in records { out.yield(.action(record)) }
             actions.append(contentsOf: records)
 
-            if records.isEmpty || round == config.maxToolRounds - 1 { break }
+            if records.isEmpty || round == maxRounds - 1 { break }
 
             // Siguiente ronda: el modelo ve su propia llamada y el resultado REAL.
-            let rawAssistant = ([roundVisible] + executedBlocks.map { "\(Persona.toolOpen)\($0.content)\(Persona.toolClose)" })
+            let rawAssistant = ([roundVisible] + executedBlocks.map { "\(Persona.toolOpen)\($0)\(Persona.toolClose)" })
                 .filter { !$0.isEmpty }.joined(separator: "\n")
             turns.append(ChatTurn(role: .assistant, content: rawAssistant))
             turns.append(ChatTurn(role: .user, content: Persona.wrapResults(records.map(Self.describe))))
         }
 
-        let finalText = displayText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if finalText.isEmpty && actions.isEmpty {
-            out.yield(.failed("El modelo no devolvió texto. Prueba de nuevo o cambia de modelo."))
-            return
+        var finalText = displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if finalText.isEmpty {
+            if actions.isEmpty {
+                diagnose("sin texto ni acciones tras \(emptyRetries) reintento(s)")
+                out.yield(.failed(Self.emptyReplyFailure))
+                return
+            }
+            if !actions.contains(where: { $0.isVisible }) {
+                // Todo lo intentado quedó oculto (p. ej. datos que faltaban): nunca se deja una burbuja en blanco.
+                finalText = Self.couldNotCompleteText
+                out.yield(.delta(finalText))
+            }
         }
         let message = ChatMessage(role: .assistant, text: finalText, date: clock(), actions: actions, engineName: engine.descriptor.displayName)
         history.append(message)
         if history.count > maxStoredMessages { history.removeFirst(history.count - maxStoredMessages) }
         out.yield(.completed(message))
     }
+
+    // MARK: Respuestas vacías
+
+    /// Veces que se vuelve a pedir una respuesta vacía antes de rendirse (sirve también tras ejecutar una herramienta).
+    static let maxEmptyRetries = 2
+    static let emptyReplyFailure = "El modelo no devolvió texto tras reintentarlo. Prueba de nuevo o cambia de modelo."
+    static let couldNotCompleteText = "No logré completar eso con los datos que tengo. Dime qué quieres hacer con un poco más de detalle (qué, cuándo, con quién) y lo intento de nuevo."
 
     // MARK: Ejecución de una ronda de herramientas
 
@@ -207,14 +251,14 @@ public actor ConversationEngine {
 
     /// Ejecuta las llamadas de una ronda. Las seguras e independientes corren en paralelo; las sensibles (con confirmación)
     /// y las de memoria van una a una y en orden. Devuelve los registros en el orden original de las llamadas.
-    private func executeRound(_ blocks: [StreamingTagFilter.Captured], _ out: AsyncStream<ConversationEvent>.Continuation) async -> [ActionRecord] {
+    private func executeRound(_ blocks: [String], _ out: AsyncStream<ConversationEvent>.Continuation) async -> [ActionRecord] {
         var parsed: [(index: Int, call: ToolCall)] = []
         var slots: [ActionRecord?] = Array(repeating: nil, count: blocks.count)
         for (index, block) in blocks.enumerated() {
-            if let call = ToolCallParser.parse(block.content) {
+            if let call = ToolCallParser.parse(block) {
                 parsed.append((index, call))
             } else {
-                diagnose("llamada de herramienta malformada: \(String(block.content.prefix(120)))")
+                diagnose("llamada de herramienta malformada: \(String(block.prefix(120)))")
                 slots[index] = ActionRecord(tool: "desconocida", summary: "Llamada de herramienta malformada",
                                             outcome: .failed("El formato de la llamada no era válido."), date: clock(), showToUser: false)
             }
