@@ -2,6 +2,16 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.5.0] — Núcleo 3D y pantalla principal según la referencia (sin verificar en pantalla)
+
+El núcleo 2D (Canvas) se leía como una ilustración vectorial. Se sustituye por un objeto tridimensional real. Ver **CORE_VISUAL.md** (decisión técnica, fidelidad frente a la referencia y lo que no se reproduce).
+
+- **`ViernesCoreVisual`** (componente independiente, solo recibe estados visuales): escena **SceneKit** con dos eslabones de cromo **entrelazados** (malla procedural de bandas con torsión y ondulación), un anillo orbital, materiales PBR metálicos, tiras incandescentes, chispa central con luz naranja real, mapa de entorno procedural para los reflejos, bloom HDR, destello y partículas. Estados: `idle, listening, thinking, speaking, executing, error, offline`, con parámetros suavizados. El 2D queda como respaldo (sin Metal, «efectos reducidos», pruebas de UI).
+- **Pantalla principal** rehecha según la referencia: marca y engranaje, núcleo grande, pastilla «En línea», «¿En qué puedo ayudarte?», mosaicos **Mi día · Tareas · Clima · Más** (menú con Memoria, Historial, Nueva conversación y Preguntar a Claude) y cápsula de voz. Fondo con barridos de cromo y vetas naranja (`ChromeBackdrop`).
+- **Capturas del simulador en el CI** (`screenshots.yml`, rama `ci-screenshots`) para revisar el diseño sin un Mac; estados fijados con `--uitest-core-state=…` y una conversación de ejemplo («Vista de prueba») con `--uitest-demo-weather`, ambos **solo con `--uitest`**.
+- Pruebas de UI actualizadas al menú «Más». Análisis de funciones avanzadas en `AGENT_AND_AUTOMATION.md`.
+- **Sin verificar**: el aspecto real, la fluidez a 60 fps y la batería en un iPhone; SceneKit está marcado como obsoleto por Apple (avisos de compilación, funciona en iOS 18).
+
 ## [0.4.0] — Auditoría crítica: calendario, resultados internos, confirmaciones y clima (sin verificar en iPhone)
 
 Tras probar la 0.3.0 en el iPhone: el calendario no funcionaba aun con permisos, aparecían etiquetas internas como `[RESULTADO_HERRAMIENTA]` en la conversación y Viernes preguntaba demasiado antes de actuar.
