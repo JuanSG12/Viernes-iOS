@@ -178,7 +178,12 @@ final class ViernesUITests: XCTestCase {
     func testPermissionsScreenListsEachPermissionWithItsReason() {
         let app = launch()
         app.buttons["open-settings"].tap()
-        app.buttons["settings-permissions"].tap()
+        // La lista de ajustes es perezosa: según la altura de la hoja, «Permisos» puede quedar fuera de pantalla y no existir
+        // para XCUITest hasta desplazarse.
+        let permissions = app.buttons["settings-permissions"]
+        _ = permissions.waitForExistence(timeout: 5)
+        reveal(permissions, in: app)
+        permissions.tap()
         for id in ["permission-mic", "permission-speech", "permission-reminders", "permission-calendar"] {
             XCTAssertTrue(field(app, id).waitForExistence(timeout: 5), "Falta \(id)")
         }
