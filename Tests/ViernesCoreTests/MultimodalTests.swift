@@ -372,9 +372,9 @@ final class TextDocumentTests: XCTestCase {
         let good = DocumentBuilders.json(name: "a.json", text: #"{"b":2,"a":{"x":[1,2]}}"#)
         XCTAssertTrue(good.warnings.isEmpty)
         XCTAssertTrue(good.fullText.contains("\"a\" : {"), "Se reescribe con sangría y claves ordenadas: \(good.fullText)")
-        let bad = DocumentBuilders.json(name: "b.json", text: #"{"a": 1,}"#)
+        let bad = DocumentBuilders.json(name: "b.json", text: #"{"a": 1 "b": 2}"#)
         XCTAssertEqual(bad.warnings.count, 1)
-        XCTAssertTrue(bad.fullText.contains("\"a\": 1"), "Si no es válido se conserva el texto original")
+        XCTAssertTrue(bad.fullText.contains("\"a\": 1 \"b\": 2"), "Si no es válido se conserva el texto original")
     }
 
     func testXMLWellFormednessIsChecked() {
