@@ -121,8 +121,7 @@ final class ViernesUITests: XCTestCase {
 
     func testWakeWordToggleExplainsLimitations() {
         let app = launch()
-        app.buttons["open-settings"].tap()
-        app.buttons["settings-listening"].tap()
+        openSettingsRow(app, "settings-listening")
         XCTAssertTrue(app.switches["wake-toggle"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'iOS no permite'")).firstMatch.exists)
         XCTAssertEqual(app.switches["wake-toggle"].value as? String, "0")      // apagada por defecto
@@ -130,8 +129,7 @@ final class ViernesUITests: XCTestCase {
 
     func testClaudeModesAreHonestlyDescribed() {
         let app = launch()
-        app.buttons["open-settings"].tap()
-        app.buttons["settings-claude"].tap()
+        openSettingsRow(app, "settings-claude")
         XCTAssertTrue(app.buttons["claude-mode-openApp"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["claude-mode-openApp"].label.contains("NO integra Claude"))      // el botón agrupa su texto
         app.buttons["claude-mode-shortcut"].tap()
@@ -165,7 +163,11 @@ final class ViernesUITests: XCTestCase {
     func testPrivacyEraseRequiresConfirmation() {
         let app = launch()
         app.buttons["open-settings"].tap()
-        app.buttons["settings-privacy"].tap()
+        // La lista de ajustes es perezosa: según la altura de la hoja, «Privacidad» puede quedar fuera de pantalla.
+        let privacy = app.buttons["settings-privacy"]
+        _ = privacy.waitForExistence(timeout: 5)
+        reveal(privacy, in: app)
+        privacy.tap()
         let erase = app.buttons["erase-all"]
         // La lista es perezosa: el botón del final no existe en pantalla hasta que se desplaza.
         var attempts = 0
