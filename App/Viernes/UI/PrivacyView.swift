@@ -76,6 +76,6 @@ struct PrivacyView: View {
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("¿Borrar todo?", isPresented: $confirmErase, titleVisibility: .visible) {
             Button("Borrar memoria, historial y ajustes", role: .destructive) { model.eraseAllData() }
-        } message: { Text("Se eliminan recuerdos, conversaciones, ajustes y la clave de cifrado. Los modelos descargados no se tocan. No se puede deshacer.") }
+        } message: { Text("Se eliminan los recuerdos, conversaciones, biblioteca, ajustes, claves y la clave de cifrado de ESTE perfil. Los demás perfiles y los modelos descargados no se tocan. No se puede deshacer.") }
     }
 }

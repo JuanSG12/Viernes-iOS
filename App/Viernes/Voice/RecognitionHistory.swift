@@ -18,6 +18,8 @@ final class RecognitionHistory: ObservableObject {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         fileURL = base.appendingPathComponent(fileName)
+        // El nombre puede incluir la carpeta del perfil («Viernes/profiles/<id>/…»).
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     }
 
     /// Carga lo guardado (si el usuario permite guardar historial).

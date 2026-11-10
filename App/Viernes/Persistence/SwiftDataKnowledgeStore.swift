@@ -47,28 +47,30 @@ final class KnowledgeCollectionRecord {
 extension ViernesStore {
     /// Contenedor de la biblioteca: otro archivo (`knowledge.store`), así la memoria y los documentos nunca comparten almacén
     /// (base de la separación por usuario/perfil de la fase 4) y añadir la biblioteca no toca los datos que ya existían.
+    static var knowledgeSchema: Schema { Schema([KnowledgeItemRecord.self, KnowledgeChunkRecord.self, KnowledgeCollectionRecord.self]) }
+
     static func makeKnowledgeContainer(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema([KnowledgeItemRecord.self, KnowledgeChunkRecord.self, KnowledgeCollectionRecord.self])
         if inMemory {
-            return try ModelContainer(for: schema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
+            return try ModelContainer(for: knowledgeSchema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
         }
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let directory = support.appendingPathComponent("Viernes", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-                                                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-        let container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, url: directory.appendingPathComponent("knowledge.store"))])
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        var mutableDirectory = directory
-        try? mutableDirectory.setResourceValues(values)
-        return container
+        return try openStore(schema: knowledgeSchema, at: support.appendingPathComponent("Viernes", isDirectory: true).appendingPathComponent("knowledge.store"))
+    }
+
+    /// Almacén de la biblioteca en la ruta que decide el perfil (ver `ProfileStorageLayout`).
+    static func makeKnowledgeContainer(storeURL: URL) throws -> ModelContainer {
+        try openStore(schema: knowledgeSchema, at: storeURL)
     }
 }
 
 /// `KnowledgeStore` sobre SwiftData con contenido cifrado. El índice de búsqueda vive en RAM (se reconstruye al abrir), así nunca queda en claro en disco.
 @ModelActor
 actor SwiftDataKnowledgeStore: KnowledgeStore {
-    private var vault: Vault { Vault() }
+    private let vaultBox = VaultBox()
+    private var vault: Vault { vaultBox.current }
+
+    /// Cifra y descifra con la clave de ESTE perfil. Sin llamarlo, usa la del perfil heredado.
+    nonisolated func use(vault: Vault) { vaultBox.set(vault) }
 
     func loadAll() async throws -> KnowledgeSnapshot {
         var snapshot = KnowledgeSnapshot()

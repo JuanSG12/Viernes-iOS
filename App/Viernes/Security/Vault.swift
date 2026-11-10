@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import ViernesCore
 
 enum VaultError: Error, LocalizedError {
     case corrupted
@@ -10,9 +11,18 @@ enum VaultError: Error, LocalizedError {
 /// La base de datos SwiftData solo contiene bloques cifrados; sin la clave (que no sale del dispositivo) no son legibles.
 struct Vault {
     private let keychain: KeychainStore
-    private let account = "vault.key.v1"
+    /// Cuenta del Llavero de la clave. Cada perfil tiene la suya (ver `ProfileStorageLayout.vaultKeyAccount`): con la clave de
+    /// un perfil NO se puede abrir nada de otro. El perfil heredado conserva el nombre de siempre.
+    private let account: String
 
-    init(keychain: KeychainStore = KeychainStore()) { self.keychain = keychain }
+    init(keychain: KeychainStore = KeychainStore(), account: String = "vault.key.v1") {
+        self.keychain = keychain
+        self.account = account
+    }
+
+    init(layout: ProfileStorageLayout, keychain: KeychainStore = KeychainStore()) {
+        self.init(keychain: keychain, account: layout.vaultKeyAccount)
+    }
 
     /// Serializa la creación de la clave: dos actores no deben crear dos claves distintas la primera vez.
     private static let keyLock = NSLock()
@@ -49,6 +59,25 @@ struct Vault {
 
     /// Borrar la clave hace ilegibles TODOS los datos cifrados (borrado criptográfico).
     func destroyKey() throws { try keychain.delete(account: account) }
+}
+
+/// Guarda la `Vault` que usa un almacén y permite cambiarla desde fuera del actor (los almacenes SwiftData son actores generados
+/// por macro: su inicializador no admite parámetros nuevos). Sin configurar, usa la clave del perfil heredado, como siempre.
+final class VaultBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var vault = Vault()
+
+    func set(_ newVault: Vault) {
+        lock.lock()
+        vault = newVault
+        lock.unlock()
+    }
+
+    var current: Vault {
+        lock.lock()
+        defer { lock.unlock() }
+        return vault
+    }
 }
 
 extension JSONEncoder {

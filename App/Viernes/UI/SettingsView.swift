@@ -3,10 +3,21 @@ import ViernesCore
 
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
+    @EnvironmentObject var host: ProfileHost
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         List {
+            Section("Perfil") {
+                NavigationLink { ProfilesView() } label: {
+                    row(icon: "person.2", title: "Perfiles", detail: "Activo: \(host.registry.active.displayName) · memoria, documentos y claves separados", status: nil)
+                }.accessibilityIdentifier("settings-profiles")
+                NavigationLink { PersonalityView() } label: {
+                    row(icon: "theatermasks", title: "Personalidad y autonomía", detail: personalitySummary, status: nil)
+                }.accessibilityIdentifier("settings-personality")
+            }
+            .listRowBackground(Theme.carbon.opacity(0.5))
+
             Section("Cerebro") {
                 NavigationLink { ModelPickerView() } label: {
                     row(icon: "cpu", title: "Modelo local", detail: model.activeModel.displayName, status: engineStatusText)
@@ -69,6 +80,11 @@ struct SettingsView: View {
         .navigationTitle("Configuración")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { dismiss() } } }
+    }
+
+    private var personalitySummary: String {
+        let profile = model.settings.profileSettings
+        return "\(profile.assistantName) · \(profile.personality.formality.displayName) · \(profile.autonomy.displayName)"
     }
 
     private var currentVoiceName: String {

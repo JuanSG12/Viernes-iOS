@@ -8,10 +8,13 @@ public struct PersonaContext: Sendable {
     public var tools: [ToolDefinition]
     public var claudeMode: ClaudeMode
     public var spokenOutput: Bool
+    /// Perfil activo (nombre, personalidad, idioma…). `nil` o por defecto = el prompt de siempre, sin ninguna sección añadida.
+    public var profile: ProfileSettings?
 
     public init(now: Date = Date(), timeZone: TimeZone = .current, engine: ModelDescriptor,
                 memories: [MemoryItem] = [], tools: [ToolDefinition] = ToolCatalog.all,
-                claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true) {
+                claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true, profile: ProfileSettings? = nil) {
+        self.profile = profile
         self.now = now
         self.timeZone = timeZone
         self.engine = engine
@@ -87,7 +90,8 @@ public enum Persona {
             var lines: [String] = []
             for tool in context.tools {
                 let params = tool.parameters.map { "\($0.name)\($0.required ? "" : "?"): \($0.description)" }.joined(separator: "; ")
-                let confirm = tool.risk.requiresConfirmation ? " [la app pide confirmación al usuario]" : ""
+                let autonomy = context.profile?.autonomy ?? .standard
+                let confirm = autonomy.requiresConfirmation(tool.risk) ? " [la app pide confirmación al usuario]" : ""
                 lines.append("- \(tool.name)(\(params)): \(tool.summary)\(confirm)")
             }
             sections.append("""
@@ -128,9 +132,11 @@ public enum Persona {
             darte; si falla o no hay permiso, dilo tal cual.
             """)
             let names = Set(context.tools.map(\.name))
+            // Lo que el usuario apagó en su perfil no se confunde con un permiso de iOS apagado.
+            let profileOff = Set(context.profile?.disabledTools ?? [])
             var missing: [String] = []
-            if !names.contains("list_events") { missing.append("leer ni modificar eventos del calendario («Permitir que Viernes lea mi calendario»)") }
-            if !names.contains("find_contact") { missing.append("buscar contactos («Permitir que Viernes lea mis contactos»)") }
+            if !names.contains("list_events") && !profileOff.contains("list_events") { missing.append("leer ni modificar eventos del calendario («Permitir que Viernes lea mi calendario»)") }
+            if !names.contains("find_contact") && !profileOff.contains("find_contact") { missing.append("buscar contactos («Permitir que Viernes lea mis contactos»)") }
             if !missing.isEmpty {
                 sections.append("Permisos de lectura apagados: no puedes \(missing.joined(separator: " ni ")). Si el usuario lo pide, dile que lo active en Ajustes › Privacidad; no finjas haberlo hecho.")
             }
@@ -143,6 +149,11 @@ public enum Persona {
             sections.append("Puedes derivar preguntas complejas a la app de Claude del usuario con ask_claude, pero eso solo abre Claude: la respuesta no te llega. Díselo claramente cuando lo uses.")
         case .shortcut:
             sections.append("Puedes enviar una pregunta a Claude con ask_claude mediante un Atajo del usuario. La respuesta puede o no volver aquí; no prometas que lo hará.")
+        }
+
+        // Personalización del perfil: estable entre peticiones (no rompe la caché del prompt) y vacía con los valores por defecto.
+        if let profile = context.profile, let section = PersonalityPrompt.section(for: profile) {
+            sections.append(section)
         }
 
         // Lo que cambia en cada petición (la hora y los recuerdos) va AL FINAL: así el principio del prompt es idéntico entre

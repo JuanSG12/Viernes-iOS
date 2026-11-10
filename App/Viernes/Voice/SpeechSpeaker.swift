@@ -131,6 +131,9 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     // MARK: Ajustes
 
+    /// Ajustes de pronunciación del perfil activo (ver `PersonalityConfig.pronunciation`).
+    var pronunciation: [PronunciationHint] = []
+
     func apply(_ settings: VoiceSettings) {
         self.settings = settings.sanitized()
         cloudSuspended = false
@@ -205,7 +208,8 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
             return
         }
         current.recorder.segmentReady(at: uptime, characters: segment.text.count)
-        let chunk = SpeechChunk(text: segment.text, pauseAfter: segment.pauseAfter)
+        // Pronunciación del perfil: cambia solo lo que se OYE; el texto en pantalla no se toca.
+        let chunk = SpeechChunk(text: PronunciationLexicon.apply(segment.text, hints: pronunciation), pauseAfter: segment.pauseAfter)
         switch current.mode {
         case .realtime:
             if current.fellBack { sendToSystem(chunk, in: current) } else { sendRealtime(chunk.text, in: current) }

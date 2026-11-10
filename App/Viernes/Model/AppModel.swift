@@ -96,14 +96,19 @@ final class AppModel: ObservableObject {
     let confirmation = ConfirmationCenter()
     /// Vista previa de borradores de correo (la herramienta compose_email espera a que el usuario decida).
     let mailDrafts = MailDraftCenter()
+    /// Perfil al que pertenece este modelo: sus ajustes, su clave de cifrado, sus almacenes y sus claves de API son solo suyos.
+    /// Cambiar de perfil crea un `AppModel` nuevo (ver `ProfileHost`): no queda nada del anterior en memoria.
+    let profileEntry: ProfileEntry
+    let profileLayout: ProfileStorageLayout
     /// Historial local de reconocimiento de voz, para diagnóstico.
-    let recognition = RecognitionHistory()
+    let recognition: RecognitionHistory
     /// Métricas de los últimos turnos de voz (informe de rendimiento).
     let voiceMetrics = VoiceMetricsStore()
     /// Adjuntos del mensaje en preparación (fototeca, cámara, escáner, Archivos) con su estado real de lectura.
     let attachments = AttachmentCenter()
     /// Biblioteca de conocimiento personal (documentos, imÃ¡genes, notas): almacÃ©n y Ã­ndice APARTE de la memoria.
     let knowledge: KnowledgeEngine
+    private let knowledgeStore: SwiftDataKnowledgeStore
     @Published var libraryItems: [KnowledgeItem] = []
     @Published var libraryCollections: [KnowledgeCollection] = []
     /// Resultado de la Ãºltima acciÃ³n de la biblioteca (guardado, duplicado, error), para mostrarlo.
@@ -117,8 +122,9 @@ final class AppModel: ObservableObject {
     private let conversations: ConversationRepository
     private let conversation: ConversationEngine
     private var engine: LanguageModelEngine
-    private let settingsStore = SettingsStore()
+    private let settingsStore: SettingsStore
     private let monitor = NWPathMonitor()
+    private var memoryWarningObserver: NSObjectProtocol?
 
     private var generationTask: Task<Void, Never>?
     /// Transcripción en la nube / corrección en curso (se cancela como cualquier otra generación).
@@ -138,8 +144,16 @@ final class AppModel: ObservableObject {
     private var bannerTask: Task<Void, Never>?
     private let wakeMatcher = WakeWordMatcher()
 
-    init(container: ModelContainer, knowledgeContainer: ModelContainer) {
-        var loaded = settingsStore.load().sanitized()
+    /// Sin `entry`, usa el perfil heredado (los almacenamientos y las claves de siempre).
+    init(container: ModelContainer, knowledgeContainer: ModelContainer,
+         entry: ProfileEntry = ProfileEntry(displayName: "Principal", isLegacy: true), defaults: UserDefaults = .standard) {
+        let layout = ProfileStorageLayout(entry: entry)
+        let vault = Vault(layout: layout)
+        profileEntry = entry
+        profileLayout = layout
+        let store = SettingsStore(defaults: defaults, layout: layout)
+        settingsStore = store
+        var loaded = store.load().sanitized()
         if CommandLine.arguments.contains("--uitest") {
             loaded = .default
             loaded.onboardingCompleted = CommandLine.arguments.contains("--uitest-skip-onboarding")
@@ -148,20 +162,30 @@ final class AppModel: ObservableObject {
         let initial = ModelCatalog.descriptor(id: loaded.selectedModelID ?? "") ?? ModelCatalog.all[0]
         activeModel = initial
         engine = UnavailableEngine(descriptor: initial, reason: "Aún no se ha cargado ningún modelo.")
-        memoryStore = SwiftDataMemoryStore(modelContainer: container)
-        conversations = ConversationRepository(modelContainer: container)
-        let library = KnowledgeEngine(store: SwiftDataKnowledgeStore(modelContainer: knowledgeContainer), embedder: LibraryEmbedder.make())
+        let memory = SwiftDataMemoryStore(modelContainer: container)
+        memory.use(vault: vault)
+        memoryStore = memory
+        let repository = ConversationRepository(modelContainer: container)
+        repository.use(vault: vault)
+        conversations = repository
+        let libraryStore = SwiftDataKnowledgeStore(modelContainer: knowledgeContainer)
+        libraryStore.use(vault: vault)
+        knowledgeStore = libraryStore
+        recognition = RecognitionHistory(vault: vault, fileName: layout.recognitionHistoryPath)
+        let library = KnowledgeEngine(store: libraryStore, embedder: LibraryEmbedder.make())
         knowledge = library
-        let executor = DeviceToolExecutor(claude: claude, mailDrafts: mailDrafts)
+        let executor = DeviceToolExecutor(claude: claude, mailDrafts: mailDrafts, ledger: EventLedger(defaults: defaults, key: layout.createdEventsKey))
         tools = executor
-        conversation = ConversationEngine(engine: engine, memory: memoryStore, executor: executor, confirmer: confirmation,
+        conversation = ConversationEngine(engine: engine, memory: memory, executor: executor, confirmer: confirmation,
                                           config: ConversationConfig(memoryPolicy: loaded.memory, claudeMode: loaded.claude.mode,
                                                                      calendarReadEnabled: loaded.calendarReadEnabled,
                                                                      contactsReadEnabled: loaded.contactsReadEnabled,
                                                                      libraryEnabled: loaded.attachmentSettings.libraryOn,
-                                                                     askBeforeCloudLibrary: loaded.attachmentSettings.askBeforeCloud),
+                                                                     askBeforeCloudLibrary: loaded.attachmentSettings.askBeforeCloud,
+                                                                     profile: loaded.profileSettings),
                                           knowledge: library)
         wireServices()
+        speaker.pronunciation = loaded.profileSettings.personality.pronunciation
         memoryUnlocked = !loaded.requireBiometricsForMemory      // con Face ID exigido, la memoria arranca BLOQUEADA
     }
 
@@ -205,7 +229,7 @@ final class AppModel: ObservableObject {
         speaker.apply(settings.voice)
         voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)
         startConnectivityMonitor()
-        NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
+        memoryWarningObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.handleMemoryWarning() }
         }
 
@@ -214,7 +238,8 @@ final class AppModel: ObservableObject {
         await reloadMemory()
         await reloadHistory()
         await startLibrary()
-        if CommandLine.arguments.contains("--uitest"), CommandLine.arguments.contains("--uitest-demo-library") { await seedQALibrary() }
+        // Los documentos de ejemplo se siembran SOLO en el perfil principal: así las pruebas de UI pueden comprobar que otro perfil no los ve.
+        if CommandLine.arguments.contains("--uitest"), CommandLine.arguments.contains("--uitest-demo-library"), profileEntry.isLegacy { await seedQALibrary() }
         await activateModel(id: settings.selectedModelID ?? recommendedModelID())
         refreshWakeWord()
         // Al final: los comandos de Siri/Atajos encolados en un arranque en frío deben ver el modelo ya activado.
@@ -350,7 +375,8 @@ final class AppModel: ObservableObject {
             // así que el historial enviado se mantiene moderado.
             historyCharBudget: activeModel.isCloud ? 7_000 : (activeModel.isSystemModel ? 4_500 : 6_000),
             calendarReadEnabled: settings.calendarReadEnabled, contactsReadEnabled: settings.contactsReadEnabled,
-            libraryEnabled: settings.attachmentSettings.libraryOn, askBeforeCloudLibrary: settings.attachmentSettings.askBeforeCloud
+            libraryEnabled: settings.attachmentSettings.libraryOn, askBeforeCloudLibrary: settings.attachmentSettings.askBeforeCloud,
+            profile: settings.profileSettings
         ))
     }
 
@@ -366,9 +392,10 @@ final class AppModel: ObservableObject {
         }
         if settings.memory != old.memory || settings.claude.mode != old.claude.mode || settings.voice.speakResponses != old.voice.speakResponses
             || settings.calendarReadEnabled != old.calendarReadEnabled || settings.contactsReadEnabled != old.contactsReadEnabled
-            || settings.attachments != old.attachments {
+            || settings.attachments != old.attachments || settings.profile != old.profile {
             Task { await pushConversationConfig() }
         }
+        if settings.profile != old.profile { speaker.pronunciation = settings.profileSettings.personality.pronunciation }
         if settings.transcriptRetention != old.transcriptRetention {
             Task { _ = try? await conversations.prune(retention: settings.transcriptRetention); await reloadHistory() }
         }
@@ -1055,7 +1082,7 @@ final class AppModel: ObservableObject {
             try? await memoryStore.deleteAll()
             try? await conversations.deleteAll()
             try? await knowledge.deleteAll()
-            try? Vault().destroyKey()
+            try? Vault(layout: profileLayout).destroyKey()
             recognition.clear()
             tools.clearLedger()
             CloudKeyStore.deleteAll()
@@ -1069,6 +1096,32 @@ final class AppModel: ObservableObject {
             await reloadHistory()
             showBanner("Todos los datos locales de Viernes fueron eliminados.")
         }
+    }
+
+    // MARK: Perfil
+
+    /// Apaga lo que este modelo tenía en marcha (escucha, voz, generación, red, adjuntos temporales) para que `ProfileHost` pueda
+    /// sustituirlo por el de otro perfil. Después de esto el modelo no debe volver a usarse.
+    func shutdown() {
+        stopEverything()
+        loadTask?.cancel()
+        monitor.cancel()
+        if let observer = memoryWarningObserver { NotificationCenter.default.removeObserver(observer) }
+        memoryWarningObserver = nil
+        attachments.purgeAll()
+        let engineToUnload = engine
+        Task { await engineToUnload.unload() }
+    }
+
+    /// Reúne los datos de ESTE perfil (ajustes, recuerdos, biblioteca y conversaciones; nunca claves) para exportarlos.
+    func makeProfileBundle(includeVectors: Bool) async throws -> ProfileBundle {
+        let snapshots = (try? await conversations.list()) ?? []
+        let exported = snapshots.map {
+            ExportedConversation(id: $0.id, title: $0.title, startedAt: $0.startedAt, updatedAt: $0.updatedAt, messages: $0.messages)
+        }
+        return try await ProfileBundleBuilder.make(profileName: profileEntry.displayName, createdAt: profileEntry.createdAt, settings: settings,
+                                                   memory: memoryStore, knowledge: knowledgeStore, conversations: exported,
+                                                   includeVectors: includeVectors)
     }
 
     // MARK: Entradas externas (Siri, enlaces)

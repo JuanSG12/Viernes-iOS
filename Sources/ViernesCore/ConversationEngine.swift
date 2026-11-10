@@ -25,13 +25,16 @@ public struct ConversationConfig: Sendable {
     public var libraryEnabled: Bool
     /// Con un cerebro en la nube, pedir permiso antes de enviarle fragmentos de la biblioteca.
     public var askBeforeCloudLibrary: Bool
+    /// Perfil activo: identidad, personalidad, idioma, autonomía y herramientas apagadas.
+    public var profile: ProfileSettings
 
     /// 4 rondas = hasta 3 rondas de herramientas encadenadas (consultar → actuar → …) y una respuesta final.
     public init(memoryPolicy: MemoryPolicy = .default, claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true,
                 maxToolRounds: Int = 4, maxCallsPerRound: Int = 3, historyCharBudget: Int = 6_000,
                 memoryContextLimit: Int = 5, timeZone: TimeZone = .current,
                 calendarReadEnabled: Bool = false, contactsReadEnabled: Bool = false,
-                libraryEnabled: Bool = true, askBeforeCloudLibrary: Bool = true) {
+                libraryEnabled: Bool = true, askBeforeCloudLibrary: Bool = true, profile: ProfileSettings = .default) {
+        self.profile = profile.sanitized()
         self.libraryEnabled = libraryEnabled
         self.askBeforeCloudLibrary = askBeforeCloudLibrary
         self.calendarReadEnabled = calendarReadEnabled
@@ -254,7 +257,7 @@ public actor ConversationEngine {
 
         var baseSystem = Persona.systemPrompt(PersonaContext(
             now: clock(), timeZone: config.timeZone, engine: brain.descriptor, memories: contextMemories,
-            tools: availableTools(), claudeMode: config.claudeMode, spokenOutput: config.spokenOutput
+            tools: availableTools(), claudeMode: config.claudeMode, spokenOutput: config.spokenOutput, profile: config.profile
         ))
         if hasBlock { baseSystem += "\n\n" + UntrustedContent.systemRules }
         var system = baseSystem
@@ -447,6 +450,7 @@ public actor ConversationEngine {
 
     func availableTools() -> [ToolDefinition] {
         ToolCatalog.all.filter { tool in
+            if config.profile.disabledTools.contains(tool.name) { return false }
             if tool.name == "ask_claude" { return config.claudeMode != .disabled }
             if ToolCatalog.calendarReadTools.contains(tool.name) { return config.calendarReadEnabled && executor != nil }
             if tool.name == "find_contact" { return config.contactsReadEnabled && executor != nil }
@@ -497,7 +501,8 @@ public actor ConversationEngine {
 
         // Con contenido de archivos en la conversación, cualquier acción que no sea una consulta sin efectos exige confirmación:
         // un archivo no puede autorizar nada (ni siquiera crear un recordatorio o preparar un borrador).
-        if definition.risk.requiresConfirmation || (tainted && definition.risk != .safe) {
+        // La autonomía del perfil solo puede AÑADIR prudencia: `AutonomyLevel` nunca devuelve «no confirmar» donde la regla base exige confirmar.
+        if config.profile.autonomy.requiresConfirmation(definition.risk) || (tainted && definition.risk != .safe) {
             guard let confirmer = confirmer else {
                 return ActionRecord(tool: validated.name, summary: summary, outcome: .failed("No hay forma de pedir confirmación."), date: clock())
             }

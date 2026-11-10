@@ -4,43 +4,41 @@ import SwiftData
 @main
 struct ViernesApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var model: AppModel
-    private let launchError: String?
+    /// Dueño de los perfiles: crea el modelo del perfil activo (con SUS almacenes cifrados, SU clave y SUS ajustes) y lo sustituye
+    /// al cambiar de perfil. Las pruebas de UI usan almacenes en RAM para no tocar datos reales.
+    @StateObject private var host: ProfileHost
 
     init() {
-        let container: ModelContainer
-        var failureMessage: String?
-        // Las pruebas de UI usan un almacén en RAM para no tocar datos reales.
         let isUITest = CommandLine.arguments.contains("--uitest")
-        do {
-            container = try ViernesStore.makeContainer(inMemory: isUITest)
-        } catch let storeError {
-            // Si el almacén en disco falla, se usa uno en RAM y se avisa: nada se guarda hasta resolverlo.
-            container = try! ViernesStore.makeContainer(inMemory: true)
-            failureMessage = "No pude abrir el almacén de datos (\(storeError.localizedDescription)). Esta sesión no se guardará."
-        }
-        // La biblioteca de conocimiento tiene su propio almacén (otro archivo, también cifrado): nunca comparte tablas con la memoria.
-        let knowledgeContainer: ModelContainer
-        do {
-            knowledgeContainer = try ViernesStore.makeKnowledgeContainer(inMemory: isUITest)
-        } catch let storeError {
-            knowledgeContainer = try! ViernesStore.makeKnowledgeContainer(inMemory: true)
-            failureMessage = (failureMessage.map { $0 + "\n" } ?? "") + "No pude abrir el almacén de la biblioteca (\(storeError.localizedDescription)). La biblioteca no se guardará en esta sesión."
-        }
-        launchError = failureMessage
-        _model = StateObject(wrappedValue: AppModel(container: container, knowledgeContainer: knowledgeContainer))
+        _host = StateObject(wrappedValue: ProfileHost(inMemory: isUITest))
     }
 
     var body: some Scene {
         WindowGroup {
-            RootView(launchError: launchError)
+            ProfileRoot()
+                .environmentObject(host)
+                .preferredColorScheme(.dark)
+                .onOpenURL { host.model.handle(url: $0) }
+                .onChange(of: scenePhase) { _, phase in host.model.scenePhaseChanged(phase) }
+        }
+    }
+}
+
+/// Muestra la app del perfil activo. Al cambiar de perfil la identidad cambia y SwiftUI descarta todo el estado de pantalla anterior.
+struct ProfileRoot: View {
+    @EnvironmentObject var host: ProfileHost
+
+    var body: some View {
+        if host.isLocked {
+            LockedProfileView()
+        } else {
+            let model = host.model
+            RootView(launchError: host.launchError)
                 .environmentObject(model)
                 .environmentObject(model.confirmation)
                 .environmentObject(model.mailDrafts)
-                .preferredColorScheme(.dark)
-                .task { await model.bootstrap() }
-                .onOpenURL { model.handle(url: $0) }
-                .onChange(of: scenePhase) { _, phase in model.scenePhaseChanged(phase) }
+                .id(model.profileEntry.id)
+                .task(id: model.profileEntry.id) { await model.bootstrap() }
         }
     }
 }

@@ -1,13 +1,18 @@
 import Foundation
 import ViernesCore
 
-/// Ajustes NO sensibles en UserDefaults (JSON). Los secretos y los datos personales NO van aquí: ver Vault y Keychain.
+/// Ajustes NO sensibles en UserDefaults (JSON), uno por perfil. Los secretos y los datos personales NO van aquí: ver Vault y Keychain.
 struct SettingsStore {
     private let defaults: UserDefaults
-    private let settingsKey = "viernes.settings.v1"
+    private let settingsKey: String
+    /// Los modelos descargados son del DISPOSITIVO (pesos locales compartidos por todos los perfiles), no de un perfil.
     private let preparedKey = "viernes.preparedModels.v1"
 
-    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    /// Sin `layout`, usa el perfil heredado (los nombres de siempre).
+    init(defaults: UserDefaults = .standard, layout: ProfileStorageLayout? = nil) {
+        self.defaults = defaults
+        self.settingsKey = layout?.settingsKey ?? "viernes.settings.v1"
+    }
 
     func load() -> AppSettings {
         guard let data = defaults.data(forKey: settingsKey),
@@ -19,14 +24,23 @@ struct SettingsStore {
         if let data = try? JSONEncoder().encode(settings) { defaults.set(data, forKey: settingsKey) }
     }
 
+    /// ¿Hay ajustes guardados de este perfil? (un perfil nuevo no los tiene hasta que se cambia algo).
+    var hasSavedSettings: Bool { defaults.data(forKey: settingsKey) != nil }
+
     /// Modelos que ya se cargaron con éxito alguna vez (para recargarlos solos desde la caché local).
     var preparedModelIDs: Set<String> { Set(defaults.stringArray(forKey: preparedKey) ?? []) }
     func markPrepared(_ id: String) { defaults.set(Array(preparedModelIDs.union([id])), forKey: preparedKey) }
     func unmarkPrepared(_ id: String) { defaults.set(Array(preparedModelIDs.subtracting([id])), forKey: preparedKey) }
 
+    /// Borra los ajustes de ESTE perfil y olvida qué modelos estaban preparados (los pesos descargados siguen en el dispositivo).
     func reset() {
         defaults.removeObject(forKey: settingsKey)
         defaults.removeObject(forKey: preparedKey)
+    }
+
+    /// Borra SOLO los ajustes de este perfil (al eliminar un perfil): lo que es del dispositivo no se toca.
+    func removeSettings() {
+        defaults.removeObject(forKey: settingsKey)
     }
 }
 

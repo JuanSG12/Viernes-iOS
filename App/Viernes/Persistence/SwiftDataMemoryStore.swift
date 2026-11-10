@@ -6,7 +6,11 @@ import ViernesCore
 /// La búsqueda se hace en RAM sobre los recuerdos descifrados (son pocos y de texto corto), así el índice nunca queda en claro en disco.
 @ModelActor
 actor SwiftDataMemoryStore: MemoryStore {
-    private var vault: Vault { Vault() }
+    private let vaultBox = VaultBox()
+    private var vault: Vault { vaultBox.current }
+
+    /// Cifra y descifra con la clave de ESTE perfil. Sin llamarlo, usa la del perfil heredado.
+    nonisolated func use(vault: Vault) { vaultBox.set(vault) }
 
     func all() async throws -> [MemoryItem] {
         let records = try modelContext.fetch(FetchDescriptor<MemoryRecord>())
@@ -54,7 +58,11 @@ actor SwiftDataMemoryStore: MemoryStore {
 /// Historial de conversaciones (cifrado) con retención configurable.
 @ModelActor
 actor ConversationRepository {
-    private var vault: Vault { Vault() }
+    private let vaultBox = VaultBox()
+    private var vault: Vault { vaultBox.current }
+
+    /// Cifra y descifra con la clave de ESTE perfil. Sin llamarlo, usa la del perfil heredado.
+    nonisolated func use(vault: Vault) { vaultBox.set(vault) }
 
     func list() async throws -> [ConversationSnapshot] {
         let records = try modelContext.fetch(FetchDescriptor<ConversationRecord>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]))

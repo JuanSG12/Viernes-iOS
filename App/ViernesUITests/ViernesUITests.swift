@@ -294,6 +294,84 @@ final class ViernesUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 15), .completed, "Lo borrado deja de aparecer en las búsquedas")
     }
 
+    // MARK: Perfiles
+
+    private func openSettingsRow(_ app: XCUIApplication, _ id: String) {
+        app.buttons["open-settings"].tap()
+        let row = app.buttons[id]
+        _ = row.waitForExistence(timeout: 5)
+        reveal(row, in: app)
+        XCTAssertTrue(row.exists, "Falta la fila \(id) en Configuración")
+        row.tap()
+    }
+
+    private func contractRow(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "contrato, indexado")).firstMatch
+    }
+
+    func testProfilesKeepTheirDataSeparateAndSwitchingBringsEachOneBack() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitest", "--uitest-skip-onboarding", "--uitest-demo-library"]
+        app.launchEnvironment["VIERNES_KEYCHAIN_SERVICE"] = "com.example.viernes.uitests"
+        app.launch()
+
+        // El perfil principal tiene su biblioteca (documentos que pasaron por el pipeline real).
+        openLibrary(app)
+        XCTAssertTrue(contractRow(app).waitForExistence(timeout: 20), "El contrato debe estar en el perfil principal")
+        app.buttons["Cerrar"].tap()
+
+        // Crear un perfil nuevo y entrar en él.
+        openSettingsRow(app, "settings-profiles")
+        let newProfile = app.buttons["profile-new"]
+        XCTAssertTrue(newProfile.waitForExistence(timeout: 5))
+        newProfile.tap()
+        let nameField = app.alerts.textFields.firstMatch
+        XCTAssertTrue(nameField.waitForExistence(timeout: 5))
+        nameField.typeText("Beto")
+        app.alerts.buttons["Crear y entrar"].tap()
+
+        // En el perfil nuevo no está nada del principal.
+        openLibrary(app)
+        XCTAssertTrue(field(app, "library-empty").waitForExistence(timeout: 10), "El perfil nuevo empieza con la biblioteca vacía")
+        XCTAssertFalse(contractRow(app).exists, "El contrato del perfil principal no aparece en el otro perfil")
+        app.buttons["Cerrar"].tap()
+
+        // Volver al principal: sus documentos siguen ahí.
+        openSettingsRow(app, "settings-profiles")
+        let principal = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Principal, ")).firstMatch
+        XCTAssertTrue(principal.waitForExistence(timeout: 5))
+        XCTAssertTrue(principal.label.contains("inactivo"), "El principal ya no es el activo: «\(principal.label)»")
+        principal.tap()
+        let switchButton = app.buttons["profile-switch"]
+        XCTAssertTrue(switchButton.waitForExistence(timeout: 5))
+        switchButton.tap()
+        openLibrary(app)
+        XCTAssertTrue(contractRow(app).waitForExistence(timeout: 20), "Al volver, el perfil principal conserva su biblioteca")
+    }
+
+    func testPersonalityShowsExactlyWhatIsAddedToTheModel() {
+        let app = launch()
+        openSettingsRow(app, "settings-personality")
+        let preview = field(app, "personality-preview")
+        reveal(preview, in: app)
+        XCTAssertTrue(preview.exists)
+        XCTAssertTrue(preview.label.contains("Nada"), "Con los valores por defecto no se añade nada: «\(preview.label)»")
+
+        let name = app.textFields["personality-name"]
+        reveal(name, in: app)
+        typeText("Jarvis", into: name, in: app)
+        let autonomy = app.segmentedControls["personality-autonomy"]
+        reveal(autonomy, in: app)
+        XCTAssertTrue(autonomy.exists, "Falta el selector de autonomía")
+        autonomy.buttons.element(boundBy: 0).tap()          // «Prudente» es el primer segmento
+
+        reveal(preview, in: app)
+        let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Jarvis"), object: preview)
+        XCTAssertEqual(XCTWaiter().wait(for: [updated], timeout: 10), .completed, "La vista previa refleja el nombre elegido: «\(preview.label)»")
+        XCTAssertTrue(preview.label.contains("Prudencia"), "Y la autonomía elegida: «\(preview.label)»")
+        XCTAssertTrue(preview.label.contains("honestidad"), "Y siempre la nota de que no cambia las reglas: «\(preview.label)»")
+    }
+
     func testPermissionsScreenListsEachPermissionWithItsReason() {
         let app = launch()
         app.buttons["open-settings"].tap()

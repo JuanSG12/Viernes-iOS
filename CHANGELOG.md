@@ -2,6 +2,20 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.7.0-fase4] — Personalización y preparación multiusuario (escrita; el CI aún no la ha verificado; sin probar en el iPhone)
+
+Detalle, separación de datos y arquitectura comercial (documentada, sin facturación) en **PERSONALIZATION_ARCHITECTURE.md**.
+
+- **Perfiles**: hasta 8 en el iPhone, cada uno con SU memoria, SUS documentos, SUS conversaciones, SUS ajustes, SUS claves de API y SU clave de cifrado (almacenes y cuentas del Llavero distintos). El perfil que ya existía conserva exactamente sus nombres: no se migra ni se mueve nada. Cambiar de perfil crea un modelo nuevo y descarta el anterior. Perfiles **protegidos** con Face ID/código. Eliminar un perfil borra su clave, claves de API, ajustes y archivos.
+- **Personalidad** separada del motor: trato, naturalidad, longitud, estilo, instrucciones personales, pronunciación, idioma y región, nombre de la asistente; con los valores por defecto el prompt es idéntico al de siempre; las instrucciones se neutralizan y acotan y no pueden tocar las reglas.
+- **Autonomía** prudente/normal/proactiva: solo puede pedir más confirmaciones, nunca menos. **Herramientas apagadas por perfil**.
+- **Exportar/importar** un perfil (sin claves; cifrado opcional con contraseña PBKDF2 + AES-GCM). Importar crea un perfil nuevo, con recuerdos pendientes de aprobar, sin instrucciones personales salvo confianza expresa y sin activar permisos.
+- **Interfaz**: Ajustes › Perfiles (lista, nuevo, cambiar, renombrar, proteger, exportar, importar, eliminar) y Ajustes › Personalidad (con la vista previa exacta de lo que se añade al modelo).
+- **Arquitectura comercial** documentada (Free/Plus/Pro/Business), sin precios, sin facturación y sin cifras inventadas.
+- Pruebas nuevas: núcleo (registro, nombres de almacenamiento, personalidad, autonomía, herramientas, pronunciación, dos perfiles de prueba con memoria/documentos/configuración separados, paquete de exportación), app (dos perfiles sobre archivos reales con claves distintas, borrado, cifrado del archivo, `ProfileHost`) y 2 de interfaz.
+- Arreglo: la prueba de interfaz de borrado de la biblioteca esperaba el instante equivocado (el resultado viejo sigue en pantalla unos instantes tras borrar).
+- **Sin verificar en el dispositivo**: biometría real, selector de archivos/compartir, rendimiento de PBKDF2, personalidades con proveedores reales. Sin sincronización entre dispositivos.
+
 ## [0.7.0-fase3] — Knowledge Engine: biblioteca de conocimiento personal (el CI compila y prueba; sin probar en el iPhone)
 
 Detalle, pipeline, búsqueda y límites en **KNOWLEDGE_ENGINE.md**.

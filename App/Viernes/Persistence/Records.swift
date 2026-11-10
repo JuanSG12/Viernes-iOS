@@ -39,19 +39,30 @@ final class ConversationRecord {
 }
 
 enum ViernesStore {
+    static var memorySchema: Schema { Schema([MemoryRecord.self, ConversationRecord.self]) }
+
     /// Contenedor SwiftData con protección de archivo `complete` (el archivo es ilegible con el teléfono bloqueado).
+    /// Este es el almacén del perfil heredado: `Application Support/Viernes/viernes.store`.
     static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema([MemoryRecord.self, ConversationRecord.self])
         if inMemory {
-            return try ModelContainer(for: schema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
+            return try ModelContainer(for: memorySchema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
         }
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let directory = support.appendingPathComponent("Viernes", isDirectory: true)
+        return try openStore(schema: memorySchema, at: support.appendingPathComponent("Viernes", isDirectory: true).appendingPathComponent("viernes.store"))
+    }
+
+    /// Almacén de memoria e historial en la ruta que decide el perfil (ver `ProfileStorageLayout`).
+    static func makeContainer(storeURL: URL) throws -> ModelContainer {
+        try openStore(schema: memorySchema, at: storeURL)
+    }
+
+    /// Abre (o crea) un almacén SwiftData: carpeta con protección de archivo y excluida de copias de seguridad de iCloud/iTunes
+    /// (la clave que lo cifra está ligada a este dispositivo, así que no serían legibles igualmente).
+    static func openStore(schema: Schema, at url: URL) throws -> ModelContainer {
+        let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-        let url = directory.appendingPathComponent("viernes.store")
         let container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, url: url)])
-        // Excluir de copias de seguridad de iCloud/iTunes: la clave está ligada a este dispositivo, así que no serían legibles igualmente.
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var mutableDirectory = directory
