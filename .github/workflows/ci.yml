@@ -43,6 +43,8 @@ jobs:
   core:
     name: Core (swift test)
     runs-on: ${{ inputs.runner || 'macos-26' }}
+    permissions:
+      contents: write          # solo para publicar el texto de los fallos en la rama ci-errors-core si algo falla
     steps:
       - uses: actions/checkout@v4
       - name: Versiones
@@ -50,7 +52,29 @@ jobs:
           xcodebuild -version
           swift --version
       - name: Pruebas del core
-        run: swift test 2>&1 | tee core-test.log
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee core-test.log
+      # El registro solo se ve con sesión de GitHub: si fallan pruebas o la compilación, el texto de los fallos se publica en una
+      # rama pública (ci-errors-core) para poder leerlo sin sesión.
+      - name: Publicar fallos en la rama ci-errors-core (si falló)
+        if: failure()
+        run: |
+          mkdir -p /tmp/ci-errors
+          OUT=/tmp/ci-errors/errores.txt
+          echo "core  commit: ${GITHUB_SHA}" > "$OUT"
+          echo "=== errores y pruebas fallidas" >> "$OUT"
+          grep -hE "error:|Test Case .* failed|XCTAssert|fatal error" core-test.log 2>/dev/null | cut -c1-500 | sort -u | head -80 >> "$OUT" || true
+          echo "=== últimas líneas" >> "$OUT"
+          tail -40 core-test.log 2>/dev/null | cut -c1-300 >> "$OUT" || true
+          cd /tmp/ci-errors
+          git init -q
+          git checkout -q -b ci-errors-core
+          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Fallos del core para ${GITHUB_SHA}"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ci-errors-core
       - uses: actions/upload-artifact@v4
         if: always()
         with:
