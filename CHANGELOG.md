@@ -2,7 +2,17 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
-## [0.7.0-fase4] — Personalización y preparación multiusuario (escrita; el CI aún no la ha verificado; sin probar en el iPhone)
+## [0.7.0] — Fase 5: integración final (incluye las fases 1 a 4; CI verde en e3876e3: estáticas, núcleo, app sin MLX y app completa; sin probar en el iPhone)
+
+No se añadió funcionalidad nueva en la fase 5: se integró y se verificó todo lo anterior. En la práctica fueron ciclos de CI que sacaron fallos reales (abajo) y un IPA que reúne las cuatro fases.
+
+**Regresión.** El CI ejecuta unas 450 pruebas (núcleo: motor de conversación, herramientas, memoria, calendario, contactos, correo, mensajes, clima, atajos, Claude, voz, multimodal, biblioteca, perfiles; app: SwiftData cifrado, Llavero, Vault, integración e interfaz en simulador) y compila la variante con MLX. **Verificado solo en CI**: la lógica de motores y herramientas con dobles de prueba. **NO verificado en el iPhone** (no se puede desde aquí): llamadas reales a Groq, Gemini y ElevenLabs; MLX local; calendario, recordatorios, contactos, correo y mensajes reales; cámara, escáner, micrófono, Face ID, selector de archivos; rendimiento real.
+
+**Fallos reales encontrados y corregidos en esta ronda**: (1) en la búsqueda de la biblioteca, un empate dependía del orden aleatorio de un diccionario (ahora es determinista); (2) una prueba de interfaz de borrado esperaba el instante equivocado; (3) las pruebas de Ajustes no se desplazaban hasta filas que quedaron fuera de pantalla; (4) una prueba de importación suponía un valor de fábrica erróneo para Claude.
+
+**Privacidad y consumo (revisión por lectura de código, sin medición en el iPhone).** Nada sale del teléfono sin acción del usuario: adjuntos y fragmentos de la biblioteca piden permiso con un cerebro en la nube; no hay embeddings en la nube; la voz en la nube, el dictado en servidores y el envío de adjuntos son opcionales; cada perfil tiene sus propias claves. Consumo: el índice de la biblioteca vive en RAM (hasta unos 16 MB con los límites) y solo el del perfil activo; cambiar de perfil descarta el anterior; PBKDF2 (600 000 vueltas) solo corre al exportar o importar con contraseña. **No hay cifras medidas de batería, memoria ni latencia en un iPhone real**: está pendiente.
+
+## [0.7.0-fase4] — Personalización y preparación multiusuario (CI verde en e3876e3; sin probar en el iPhone)
 
 Detalle, separación de datos y arquitectura comercial (documentada, sin facturación) en **PERSONALIZATION_ARCHITECTURE.md**.
 
