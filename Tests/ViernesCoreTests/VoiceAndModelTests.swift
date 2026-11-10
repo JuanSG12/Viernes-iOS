@@ -211,7 +211,10 @@ final class VoiceAndModelTests: XCTestCase {
         XCTAssertFalse(defaults.continuousConversation)
         XCTAssertFalse(defaults.allowServerRecognition)      // el audio no sale del teléfono por defecto
         XCTAssertFalse(defaults.memory.autoSuggest)
-        XCTAssertEqual(defaults.claude.mode, .disabled)
+        // Claude: desde la 0.4 el modo por defecto es «abrir la app» (con «desactivado» la herramienta ni se ofrecía al modelo), pero
+        // nada sale hacia Claude sin que el usuario lo confirme: `ask_claude` es de riesgo `external` y siempre pide confirmación.
+        XCTAssertEqual(defaults.claude.mode, .openApp)
+        XCTAssertTrue(ToolCatalog.definition(named: "ask_claude")?.risk.requiresConfirmation ?? false)
         XCTAssertEqual(defaults.transcriptRetention, .days7)
     }
 }
