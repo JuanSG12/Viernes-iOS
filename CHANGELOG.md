@@ -16,6 +16,7 @@ Reporte real: al responder por voz, el audio se traba. Ver **VOICE_ENGINE.md** (
 - **CI**: el paso de pruebas del núcleo no tenía `pipefail` (un fallo de `swift test` no habría hecho fallar el trabajo): corregido; los fallos del núcleo y de la app se publican en ramas públicas `ci-errors-*`.
 - ≈ 45 pruebas nuevas en `VoiceEngineTests.swift` (segmentación independiente de los deltas, turnos, colchón, PCM partido a media muestra, métricas con reloj falso, protocolo, simulación de un turno y de una interrupción).
 - **Sin verificar en el dispositivo**: todo lo de audio, red y ElevenLabs (incluidos `pcm_24000` y `auto_mode` con una cuenta gratuita); no hay ninguna cifra de latencia real.
+- **Estado del CI en `517d7ee`**: comprobaciones estáticas, pruebas del núcleo (217) y compilación + pruebas de UI de la app completa (con MLX) en verde; IPA sin firmar compilado. La variante sin MLX no obtuvo runner de macOS (cancelada sin ejecutar pasos) y se relanzó en el commit siguiente.
 
 ## [0.6.0] — Viernes 2.0: modificar y borrar eventos, correo con vista previa, dictado mejorado y límite de Groq (el CI lo compila y prueba; sin probar en el iPhone)
 
