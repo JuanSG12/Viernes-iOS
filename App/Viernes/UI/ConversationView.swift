@@ -50,6 +50,7 @@ enum ToolPhrases {
 /// tarjetas para lo que REALMENTE hicieron las herramientas y un indicador de procesamiento.
 struct ConversationView: View {
     @EnvironmentObject var model: AppModel
+    @State private var quickLookURL: URL?
 
     private var lastAssistantID: UUID? {
         model.messages.last(where: { $0.role == .assistant })?.id
@@ -62,6 +63,8 @@ struct ConversationView: View {
                     ForEach(model.messages) { message in
                         if message.role == .user {
                             UserBubble(text: message.text,
+                                       attachments: message.attachments ?? [],
+                                       onOpenAttachment: { ref in quickLookURL = model.attachments.sentFiles[ref.id] },
                                        onCorrect: (message.id == model.lastVoiceMessageID && model.generationIdle) ? { model.correctLastMessage() } : nil)
                                 .id(message.id)
                         } else {
@@ -90,6 +93,7 @@ struct ConversationView: View {
             .onChange(of: model.coreState) { _, _ in scroll(proxy) }
         }
         .accessibilityIdentifier("conversation")
+        .quickLookPreview($quickLookURL)
     }
 
     private func scroll(_ proxy: ScrollViewProxy) {
@@ -97,9 +101,14 @@ struct ConversationView: View {
     }
 }
 
+import QuickLook
+
 struct UserBubble: View {
     let text: String
     var dim: Bool = false
+    /// Archivos que acompañaron al mensaje (solo sus datos; el contenido no se guarda en el historial).
+    var attachments: [AttachmentRef] = []
+    var onOpenAttachment: ((AttachmentRef) -> Void)?
     /// Si existe, aparece un lápiz para corregir lo que se transcribió (solo en la última frase dictada).
     var onCorrect: (() -> Void)?
 
@@ -111,13 +120,22 @@ struct UserBubble: View {
                     .accessibilityLabel("Corregir lo que dije")
                     .accessibilityIdentifier("correct-message")
             }
-            Text(text)
-                .font(Theme.body(15))
-                .foregroundStyle(Theme.textPrimary)
-                .multilineTextAlignment(.leading)
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .chromeSurface(tint: Theme.chrome, radius: 18)
-                .opacity(dim ? 0.65 : 1)
+            VStack(alignment: .trailing, spacing: 6) {
+                if !attachments.isEmpty {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        ForEach(attachments) { ref in
+                            SentAttachmentChip(ref: ref, onOpen: onOpenAttachment.map { open in { open(ref) } })
+                        }
+                    }
+                }
+                Text(text)
+                    .font(Theme.body(15))
+                    .foregroundStyle(Theme.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .chromeSurface(tint: Theme.chrome, radius: 18)
+                    .opacity(dim ? 0.65 : 1)
+            }
         }
         .padding(.leading, 56)
         .frame(maxWidth: .infinity, alignment: .trailing)

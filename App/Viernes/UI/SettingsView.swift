@@ -19,6 +19,9 @@ struct SettingsView: View {
                 NavigationLink { ClaudeSettingsView() } label: {
                     row(icon: "arrow.up.forward.app", title: "Claude", detail: model.settings.claude.mode.displayName, status: nil)
                 }.accessibilityIdentifier("settings-claude")
+                NavigationLink { AttachmentSettingsView() } label: {
+                    row(icon: "paperclip", title: "Adjuntos y visión", detail: "Imágenes, documentos, qué lee cada cerebro", status: nil)
+                }.accessibilityIdentifier("settings-attachments")
             }
             .listRowBackground(Theme.carbon.opacity(0.5))
 

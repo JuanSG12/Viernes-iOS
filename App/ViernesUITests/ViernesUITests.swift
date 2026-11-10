@@ -175,6 +175,61 @@ final class ViernesUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Borrar memoria, historial y ajustes"].waitForExistence(timeout: 3))
     }
 
+    // MARK: Adjuntos
+
+    func testAttachMenuOffersEverySourceAndSaysWhatTheDeviceCannotDo() {
+        let app = launch()
+        app.buttons["toggle-keyboard"].tap()
+        let attach = app.buttons["attach-menu"]
+        XCTAssertTrue(attach.waitForExistence(timeout: 5), "Falta el botón de adjuntar junto al campo de texto")
+        attach.tap()
+        XCTAssertTrue(menuItem(app, id: "attach-photo", label: "Foto de la fototeca").waitForExistence(timeout: 5))
+        XCTAssertTrue(menuItem(app, id: "attach-file", label: "Archivo (PDF, Word, Excel, texto…)").exists)
+        // El simulador no tiene cámara: la opción aparece desactivada y lo dice, en vez de fallar al tocarla.
+        let camera = app.buttons.containing(NSPredicate(format: "label CONTAINS 'Tomar una foto'")).firstMatch
+        XCTAssertTrue(camera.exists)
+        XCTAssertFalse(camera.isEnabled)
+        XCTAssertTrue(camera.label.contains("sin cámara"))
+    }
+
+    private func chip(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Adjunto \(name)")).firstMatch
+    }
+
+    func testAttachmentsShowTheirRealStatesAndErrorsAreExplained() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitest", "--uitest-skip-onboarding", "--uitest-demo-attachments"]
+        app.launchEnvironment["VIERNES_KEYCHAIN_SERVICE"] = "com.example.viernes.uitests"
+        app.launch()
+
+        let sheet = chip(app, "ventas.csv")
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "El CSV debe aparecer como adjunto")
+        XCTAssertTrue(sheet.label.contains("CSV"), "Listo: «\(sheet.label)»")
+
+        let note = chip(app, "nota.txt")
+        XCTAssertTrue(note.waitForExistence(timeout: 10))
+        XCTAssertTrue(note.label.contains("con avisos"), "El texto con órdenes sospechosas lleva aviso: «\(note.label)»")
+
+        let photo = chip(app, "factura.jpg")
+        XCTAssertTrue(photo.waitForExistence(timeout: 10))
+        XCTAssertTrue(photo.label.contains("Imagen"), "La imagen se lee y queda lista: «\(photo.label)»")
+
+        // Un archivo que dice ser PDF pero es texto se rechaza con su motivo y no viaja.
+        let fake = chip(app, "falso.pdf")
+        XCTAssertTrue(fake.waitForExistence(timeout: 10))
+        XCTAssertTrue(fake.label.contains("no se pudo leer"), "«\(fake.label)»")
+        fake.tap()
+        let error = app.descendants(matching: .any).matching(identifier: "attachment-error").firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 5), "El detalle explica el error")
+        XCTAssertTrue(error.label.contains("dice ser un PDF") || app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'dice ser un PDF'")).firstMatch.exists)
+        app.buttons["Cerrar"].tap()
+
+        let remove = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Quitar falso.pdf")).firstMatch
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        remove.tap()
+        XCTAssertFalse(chip(app, "falso.pdf").waitForExistence(timeout: 2), "Quitado")
+    }
+
     func testPermissionsScreenListsEachPermissionWithItsReason() {
         let app = launch()
         app.buttons["open-settings"].tap()

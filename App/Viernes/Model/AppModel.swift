@@ -100,6 +100,8 @@ final class AppModel: ObservableObject {
     let recognition = RecognitionHistory()
     /// Métricas de los últimos turnos de voz (informe de rendimiento).
     let voiceMetrics = VoiceMetricsStore()
+    /// Adjuntos del mensaje en preparación (fototeca, cámara, escáner, Archivos) con su estado real de lectura.
+    let attachments = AttachmentCenter()
     private let claude = ClaudeCoordinator()
     /// Ejecutor de herramientas del dispositivo (también lo usa la pantalla de Permisos para el diagnóstico del calendario).
     private let tools: DeviceToolExecutor
@@ -182,6 +184,9 @@ final class AppModel: ObservableObject {
         bootstrapped = true
         if CommandLine.arguments.contains("--uitest"), CommandLine.arguments.contains("--uitest-demo-weather") {
             messages = Self.qaWeatherConversation()
+        }
+        if CommandLine.arguments.contains("--uitest"), CommandLine.arguments.contains("--uitest-demo-attachments") {
+            await seedQAAttachments()
         }
         // Los errores técnicos del motor van al registro local, nunca a la conversación.
         await conversation.setDiagnostics { Diagnostics.shared.log($0) }
@@ -669,9 +674,9 @@ final class AppModel: ObservableObject {
 
     func sendTyped() {
         let text = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty || attachments.hasReady else { return }
         typedDraft = ""
-        if let base = correctionBase {
+        if !text.isEmpty, let base = correctionBase {
             // Era la corrección de una frase dictada: se aprende lo que cambió y esta pasa a ser la frase vigente.
             correctionBase = nil
             learnFromEdit(heard: base.heard, edited: text, recordID: base.recordID)
@@ -688,16 +693,23 @@ final class AppModel: ObservableObject {
             enterError()
             return
         }
+        if attachments.isProcessing {
+            showBanner("Todavía estoy leyendo los adjuntos. Espera un momento.")
+            return
+        }
+        let drafts = attachments.readyDrafts
         if listener.isRunning { listener.stop() }
         wakeWordActive = false
-        messages.append(ChatMessage(role: .user, text: text))
+        let shown = (text.isEmpty && !drafts.isEmpty) ? "Resume y explica lo que adjunté." : text
+        // Con adjuntos, el mensaje se añade a la conversación solo después de decidir a qué cerebro van (y de que el usuario lo autorice).
+        if drafts.isEmpty { messages.append(ChatMessage(role: .user, text: shown)) }
         streamingText = ""
         liveActions = []
         coreState = .thinking
         generationID += 1
         let id = generationID
         generationTask = Task { [weak self] in
-            await self?.runGeneration(text)
+            await self?.runGeneration(shown, drafts: drafts)
             guard let self = self, self.generationID == id else { return }
             self.generationTask = nil
             self.engineWaitNote = nil
@@ -705,11 +717,131 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func runGeneration(_ text: String) async {
+    // MARK: Adjuntos
+
+    private struct PreparedAttachments {
+        let bundle: AttachmentBundle
+        let engine: LanguageModelEngine?
+        let budget: Int
+    }
+
+    /// Perfil de capacidades del cerebro activo (qué puede leer de verdad).
+    var currentBrainProfile: BrainProfile {
+        CapabilityMatrix.chatProfile(descriptor: activeModel, cloud: settings.cloudBrain, overrides: settings.attachmentSettings.visionModels)
+    }
+
+    private func routingContext(current: BrainProfile) -> RoutingContext {
+        RoutingContext(current: current,
+                       providersWithKey: Set(CloudProviders.all.filter { CloudKeyStore.hasKey(providerID: $0.id) }.map { $0.id }),
+                       cloud: settings.cloudBrain, visionOverrides: settings.attachmentSettings.visionModels,
+                       online: isOnline, askBeforeCloud: settings.attachmentSettings.askBeforeCloud, canOCRLocally: true)
+    }
+
+    /// Decide a qué cerebro van los adjuntos (con permiso si algo sale del teléfono), lee con OCR local si se eligió,
+    /// y arma el paquete que recibe el motor. `nil` = no se envía (el usuario no lo autorizó o no hay forma de leerlo).
+    private func prepareAttachments(_ text: String, drafts: [DraftAttachment]) async -> PreparedAttachments? {
+        let current = currentBrainProfile
+        let summary = AttachmentSummary(imageNames: drafts.filter { $0.kind == .image }.map { $0.name },
+                                        documentNames: drafts.filter { $0.kind != .image }.map { $0.name })
+        let context = routingContext(current: current)
+        var chosen: RoutePlan?
+        switch AttachmentRouter.decide(summary, context: context) {
+        case .send(let plan):
+            chosen = plan
+        case .askConsent(let consent):
+            if await confirmation.confirm(ConfirmationRequest(tool: "attachments", title: consent.title, detail: consent.detail)) {
+                chosen = consent.plan
+            } else {
+                showBanner("No envié los adjuntos. Siguen en tu mensaje por si cambias de idea.")
+            }
+        case .cannot(let block):
+            chosen = await resolveBlockedRoute(block, context: context)
+        }
+        guard let plan = chosen, !Task.isCancelled else {
+            if typedDraft.isEmpty { typedDraft = text }          // no se pierde lo que escribió o dijo
+            return nil
+        }
+        Diagnostics.shared.log("adjuntos: \(summary.imageCount) imagen(es), \(summary.documentCount) documento(s) → \(plan.brain.id); sale del teléfono: \(plan.leavesDevice ? "sí" : "no")")
+
+        var documents = drafts.compactMap { $0.document }
+        var notes = plan.notes
+        let images = plan.sendImages ? drafts.compactMap { $0.image } : []
+        if plan.ocrImages {
+            var readAny = false
+            for draft in drafts where draft.kind == .image {
+                guard let jpeg = draft.ocrSource else { continue }
+                let recognized = await Task.detached(priority: .userInitiated) { () -> String in
+                    (try? TextRecognizer.recognize(jpeg: jpeg)) ?? ""
+                }.value
+                if recognized.isEmpty {
+                    notes.append("No encontré texto legible en «\(draft.name)».")
+                } else {
+                    readAny = true
+                    documents.append(ExtractedDocument(name: draft.name, kind: .image, sections: [DocumentSection(text: recognized)],
+                                                       recognizedByOCR: true, warnings: ["Texto reconocido por OCR en el teléfono: puede tener errores y no describe la imagen."]))
+                }
+            }
+            if !readAny && documents.isEmpty {
+                appendSystemNotice("No encontré texto legible en las imágenes, así que no hay nada que pueda leer sin un modelo con visión. Puedes usar Gemini o el modelo de visión de Groq (Ajustes › Adjuntos y visión).")
+                if typedDraft.isEmpty { typedDraft = text }
+                return nil
+            }
+        }
+        let bundle = AttachmentBundle(refs: drafts.compactMap { $0.ref }, documents: documents, images: images, notes: notes)
+        return PreparedAttachments(bundle: bundle, engine: makeOverrideEngine(for: plan.brain, current: current),
+                                   budget: plan.brain.capabilities.excerptBudgetChars)
+    }
+
+    /// El cerebro actual no puede leer lo adjuntado: se explica y se OFRECE cada alternativa; el usuario autoriza o no (nunca se elige por él).
+    private func resolveBlockedRoute(_ block: RouteBlock, context: RoutingContext) async -> RoutePlan? {
+        for alternative in block.alternatives {
+            switch alternative.action {
+            case .useBrain, .localOCR:
+                let approved = await confirmation.confirm(ConfirmationRequest(
+                    tool: "attachments", title: alternative.label, detail: block.reason + "\n\n" + alternative.explanation))
+                if approved, let plan = AttachmentRouter.plan(for: alternative, context: context) { return plan }
+                if Task.isCancelled { return nil }
+            case .removeImages, .configure:
+                continue
+            }
+        }
+        let others = block.alternatives.compactMap { alternative -> String? in
+            switch alternative.action {
+            case .configure, .removeImages: return alternative.label + ": " + alternative.explanation
+            default: return nil
+            }
+        }
+        appendSystemNotice(([block.reason + " No envié nada."] + others).joined(separator: " "))
+        return nil
+    }
+
+    /// Cerebro en la nube distinto del activo, creado SOLO para este mensaje (el activo no cambia).
+    private func makeOverrideEngine(for brain: BrainProfile, current: BrainProfile) -> LanguageModelEngine? {
+        guard brain.id != current.id, brain.isCloud, let provider = brain.providerID, let model = brain.model else { return nil }
+        let descriptor = ModelDescriptor(id: brain.id, displayName: brain.displayName, backend: .cloud, approxDownloadMB: 0, minDeviceRAMGB: 0,
+                                         license: "Términos del proveedor elegido", spanishQuality: 5,
+                                         notes: "Cerebro en la nube usado solo para este mensaje.")
+        let engine = CloudEngine(descriptor: descriptor, settings: CloudBrainSettings(providerID: provider, model: model))
+        engine.onStatus = { [weak self] text in Task { @MainActor in self?.engineWaitNote = text } }
+        return engine
+    }
+
+    private func runGeneration(_ text: String, drafts: [DraftAttachment] = []) async {
+        var bundle: AttachmentBundle?
+        var override: LanguageModelEngine?
+        var budget: Int?
+        if !drafts.isEmpty {
+            guard let prepared = await prepareAttachments(text, drafts: drafts) else { return }
+            bundle = prepared.bundle
+            override = prepared.engine
+            budget = prepared.budget
+            messages.append(ChatMessage(role: .user, text: text, attachments: prepared.bundle.refs))
+            attachments.markSent()
+        }
         let speak = settings.voice.speakResponses
         // Un turno de habla por respuesta: el texto se envía a la voz según se genera, sin esperar al final.
         if speak { speaker.beginTurn() }
-        for await event in await conversation.send(text) {
+        for await event in await conversation.send(text, attachments: bundle, engineOverride: override, excerptBudget: budget) {
             if Task.isCancelled { return }
             switch event {
             case .thinking:
@@ -800,6 +932,7 @@ final class AppModel: ObservableObject {
     func newConversation() {
         let finished = messages.filter { $0.engineName != "Sistema" }
         stopEverything()
+        attachments.purgeAll()
         messages = []
         currentConversationID = UUID()
         conversationStartedAt = Date()

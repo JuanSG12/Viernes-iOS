@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import ViernesCore
 
 /// Ayudas SOLO para las pruebas y las capturas del CI (`--uitest`): permiten fijar un estado visual para fotografiarlo.
@@ -29,6 +30,12 @@ struct MainView: View {
     @State private var sheet: Sheet?
     @State private var keyboardMode = false
     @FocusState private var inputFocused: Bool
+    @State private var showPhotoPicker = false
+    @State private var showFileImporter = false
+    @State private var showCamera = false
+    @State private var showScanner = false
+    @State private var photoSelection: [PhotosPickerItem] = []
+    @State private var detailID: IdentifiedUUID?
 
     enum Sheet: String, Identifiable {
         case settings, memory, history
@@ -96,6 +103,44 @@ struct MainView: View {
                 .presentationBackground(Theme.ink)
                 .interactiveDismissDisabled()
         }
+        // Adjuntos: fototeca, Archivos, cámara y escáner de documentos.
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoSelection,
+                      maxSelectionCount: max(1, model.attachments.imageSlotsLeft), matching: .images)
+        .onChange(of: photoSelection) { _, items in
+            guard !items.isEmpty else { return }
+            photoSelection = []
+            Task { await model.attachments.addPhotoItems(items) }
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { model.attachments.addFiles(urls) }
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker(isPresented: $showCamera) { model.attachments.addCameraImage($0) }.ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showScanner) {
+            DocumentScannerView(isPresented: $showScanner) { model.attachments.addScan(pages: $0) }.ignoresSafeArea()
+        }
+        .sheet(item: $detailID) { item in
+            AttachmentDetailSheet(center: model.attachments, id: item.id)
+        }
+    }
+
+    /// Fuentes de adjuntos (las que el dispositivo no ofrece, como la cámara en el simulador, aparecen desactivadas y lo dicen).
+    @ViewBuilder private var attachItems: some View {
+        Button { showPhotoPicker = true } label: { Label("Foto de la fototeca", systemImage: "photo.on.rectangle") }
+            .accessibilityIdentifier("attach-photo")
+        Button { showCamera = true } label: {
+            Label(AttachmentSources.cameraAvailable ? "Tomar una foto" : "Tomar una foto (sin cámara)", systemImage: "camera")
+        }
+        .disabled(!AttachmentSources.cameraAvailable)
+        .accessibilityIdentifier("attach-camera")
+        Button { showScanner = true } label: {
+            Label(AttachmentSources.scannerAvailable ? "Escanear documento" : "Escanear documento (no disponible)", systemImage: "doc.viewfinder")
+        }
+        .disabled(!AttachmentSources.scannerAvailable)
+        .accessibilityIdentifier("attach-scan")
+        Button { showFileImporter = true } label: { Label("Archivo (PDF, Word, Excel, texto…)", systemImage: "folder") }
+            .accessibilityIdentifier("attach-file")
     }
 
     // MARK: Cabecera (marca a la izquierda, engranaje a la derecha)
@@ -126,6 +171,8 @@ struct MainView: View {
 
     /// Acciones secundarias, en un menú para que la pantalla principal quede limpia.
     @ViewBuilder private var moreItems: some View {
+        Menu { attachItems } label: { Label("Adjuntar", systemImage: "paperclip") }
+            .accessibilityIdentifier("attach-menu-more")
         Button { sheet = .memory } label: { Label("Memoria", systemImage: "brain.head.profile") }
             .accessibilityIdentifier("open-memory")
         Button { sheet = .history } label: { Label("Historial", systemImage: "clock.arrow.circlepath") }
@@ -306,6 +353,9 @@ struct MainView: View {
     private var controls: some View {
         VStack(spacing: 8) {
             if let pending = model.pendingTranscript { TranscriptReviewBar(pending: pending) }
+            if !model.attachments.drafts.isEmpty {
+                AttachmentStrip(center: model.attachments) { detailID = IdentifiedUUID(id: $0) }
+            }
             if keyboardMode { inputBar }
             HStack(spacing: 10) {
                 controlButton(icon: keyboardMode ? "keyboard.chevron.compact.down" : "keyboard", label: "Teclado", id: "toggle-keyboard") {
@@ -337,6 +387,9 @@ struct MainView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
+            Menu { attachItems } label: { Image(systemName: "paperclip") }
+                .buttonStyle(ChromeIconButtonStyle(size: 44))
+                .accessibilityLabel("Adjuntar").accessibilityIdentifier("attach-menu")
             TextField("Escribe o habla…", text: $model.typedDraft, axis: .vertical)
                 .lineLimit(1...3)
                 .focused($inputFocused)
@@ -350,7 +403,7 @@ struct MainView: View {
                 .accessibilityIdentifier("text-input")
             Button { model.sendTyped() } label: { Image(systemName: "arrow.up") }
                 .buttonStyle(ChromeIconButtonStyle(tint: Theme.accent, size: 44))
-                .disabled(model.typedDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(model.typedDraft.trimmingCharacters(in: .whitespaces).isEmpty && !model.attachments.hasReady)
                 .accessibilityLabel("Enviar mensaje").accessibilityIdentifier("send-message")
         }
     }
@@ -361,6 +414,10 @@ struct MainView: View {
             .accessibilityLabel(label)
             .accessibilityIdentifier(id)
     }
+}
+
+struct IdentifiedUUID: Identifiable {
+    let id: UUID
 }
 
 struct IdentifiedConfirmation: Identifiable {

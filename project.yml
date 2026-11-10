@@ -82,6 +82,8 @@ targets:
           Solo si activas «Permitir que Viernes lea mis contactos» en Privacidad: para buscar el correo o el teléfono de una persona cuando se lo pidas y confirmes.
         NSFaceIDUsageDescription: >-
           Para proteger la pantalla de Memoria con Face ID si activas esa opción.
+        NSCameraUsageDescription: >-
+          Solo cuando tú eliges «Tomar una foto» o «Escanear documento» al adjuntar algo a un mensaje. La foto o el escaneo se leen en el teléfono y solo salen de él si lo autorizas al enviarlos a un cerebro en la nube.
         CFBundleURLTypes:
           - CFBundleURLName: com.example.viernes.link
             CFBundleURLSchemes:

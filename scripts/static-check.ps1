@@ -144,7 +144,7 @@ if ($bad -eq 0) { Ok "ningún endpoint/clave de Anthropic; sin UIBackgroundModes
 Write-Host "`n[4] Textos de permisos en project.yml"
 $checks++
 $missing = 0
-foreach ($key in 'NSMicrophoneUsageDescription','NSSpeechRecognitionUsageDescription','NSRemindersFullAccessUsageDescription','NSCalendarsWriteOnlyAccessUsageDescription','NSCalendarsFullAccessUsageDescription','NSContactsUsageDescription','NSFaceIDUsageDescription','CFBundleURLSchemes') {
+foreach ($key in 'NSMicrophoneUsageDescription','NSSpeechRecognitionUsageDescription','NSRemindersFullAccessUsageDescription','NSCalendarsWriteOnlyAccessUsageDescription','NSCalendarsFullAccessUsageDescription','NSContactsUsageDescription','NSFaceIDUsageDescription','NSCameraUsageDescription','CFBundleURLSchemes') {
     if ($yml -notmatch [regex]::Escape($key)) { Fail "falta $key en project.yml"; $missing++ }
 }
 if ($missing -eq 0) { Ok "todas las claves de privacidad y el esquema viernes:// están declaradas" }

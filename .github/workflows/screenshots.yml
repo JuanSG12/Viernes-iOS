@@ -80,6 +80,7 @@ jobs:
           shoot home-executing-bare --uitest-3d --uitest-core-state=executing --uitest-no-effects
           shoot home-fallback-2d --uitest-core-state=idle
           shoot conversation-weather --uitest-3d --uitest-demo-weather
+          shoot attachments-real-states --uitest-demo-attachments --uitest-core-state=idle
           ls -la shots
 
       - uses: actions/upload-artifact@v4
