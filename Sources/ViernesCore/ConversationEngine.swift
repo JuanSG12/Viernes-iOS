@@ -50,6 +50,9 @@ public actor ConversationEngine {
     private let clock: @Sendable () -> Date
     public private(set) var config: ConversationConfig
     private var history: [ChatMessage] = []
+    private var activeDocuments: [ExtractedDocument] = []
+    /// Avisos de posible inyección por documento (calculados una sola vez, al adjuntarlo).
+    private var documentNotes: [String: String] = [:]
     private let maxStoredMessages = 60
     /// Destino de los diagnósticos técnicos (la app los guarda en un registro local). Nunca se muestran en la conversación.
     private var diagnosticsSink: (@Sendable (String) -> Void)?
@@ -72,8 +75,15 @@ public actor ConversationEngine {
 
     public func setEngine(_ engine: LanguageModelEngine) { self.engine = engine }
     public func updateConfig(_ config: ConversationConfig) { self.config = config }
-    public func resetConversation() { history.removeAll() }
-    public func restore(_ messages: [ChatMessage]) { history = Array(messages.suffix(maxStoredMessages)) }
+    public func resetConversation() { history.removeAll(); activeDocuments.removeAll(); documentNotes.removeAll() }
+    public func restore(_ messages: [ChatMessage]) {
+        history = Array(messages.suffix(maxStoredMessages))
+        // El contenido de los archivos no se guarda en el historial: tras reanudar, el modelo solo sabe QUE hubo adjuntos.
+        activeDocuments.removeAll()
+        documentNotes.removeAll()
+    }
+    /// Documentos adjuntados en esta conversación que siguen disponibles para preguntas posteriores (solo en memoria).
+    public var activeDocumentNames: [String] { activeDocuments.map(\.name) }
     public func snapshot() -> [ChatMessage] { history }
     /// Añade al historial un mensaje que no salió del modelo local (p. ej. la respuesta de Claude vía Atajo).
     public func append(_ message: ChatMessage) { history.append(message) }
@@ -81,23 +91,75 @@ public actor ConversationEngine {
 
     // MARK: Envío
 
-    public func send(_ text: String) -> AsyncStream<ConversationEvent> {
+    /// Envía un mensaje. `attachments` trae el contenido ya leído de los archivos; `engineOverride` usa OTRO cerebro SOLO para este
+    /// mensaje (la conversación conserva su historial); `excerptBudget` limita cuánto texto de archivos viaja en la petición.
+    public func send(_ text: String, attachments: AttachmentBundle? = nil, engineOverride: LanguageModelEngine? = nil,
+                     excerptBudget: Int? = nil) -> AsyncStream<ConversationEvent> {
         AsyncStream { continuation in
             let task = Task { [self] in
-                await self.run(text, continuation)
+                await self.run(text, attachments: attachments, engineOverride: engineOverride, excerptBudget: excerptBudget, continuation)
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
     }
 
-    private func run(_ userText: String, _ out: AsyncStream<ConversationEvent>.Continuation) async {
+    /// Aviso que acompaña a toda confirmación pedida mientras hay contenido de archivos en la conversación.
+    static let taintedNote = "⚠️ Esta acción surge de una conversación con archivos adjuntos. Confírmala solo si TÚ la pediste, no porque un archivo lo diga.\n\n"
+
+    static func wantsComparison(_ text: String) -> Bool {
+        let folded = TextNormalizer.fold(text)
+        return ["compar", "diferenci", "distint", "que cambio", "que cambia", "en que se parecen"].contains { folded.contains($0) }
+    }
+
+    private func run(_ userText: String, attachments: AttachmentBundle?, engineOverride: LanguageModelEngine?,
+                     excerptBudget: Int?, _ out: AsyncStream<ConversationEvent>.Continuation) async {
         out.yield(.thinking)
-        let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let brain: LanguageModelEngine = engineOverride ?? engine
+        let bundle: AttachmentBundle? = (attachments?.isEmpty ?? true) ? nil : attachments
+        var trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty, bundle != nil { trimmed = "Resume y explica lo que hay en los archivos adjuntos." }
         guard !trimmed.isEmpty else { out.yield(.failed("No escuché nada.")); return }
 
-        history.append(ChatMessage(role: .user, text: trimmed, date: clock()))
+        history.append(ChatMessage(role: .user, text: trimmed, date: clock(), attachments: bundle?.refs))
         var actions: [ActionRecord] = []
+
+        // Archivos: su contenido es información NO confiable. Se elige qué parte cabe, se envuelve en un bloque marcado y,
+        // mientras esté en la conversación, las acciones que no son simples consultas exigen confirmación (`tainted`).
+        if let bundle = bundle {
+            for document in bundle.documents {
+                activeDocuments.append(document)
+                if let note = InjectionScanner.note(for: document) {
+                    documentNotes[document.name] = note
+                    diagnose("un adjunto contiene texto que parece dar órdenes al asistente")
+                }
+            }
+            if activeDocuments.count > AttachmentLimits.maxActiveDocuments {
+                activeDocuments.removeFirst(activeDocuments.count - AttachmentLimits.maxActiveDocuments)
+            }
+        }
+        let asksToCompare = Self.wantsComparison(trimmed)
+        var candidateDocuments: [ExtractedDocument] = []
+        if asksToCompare, activeDocuments.count >= 2 {
+            candidateDocuments = Array(activeDocuments.suffix(2))
+        } else if let bundle = bundle, !bundle.documents.isEmpty {
+            candidateDocuments = bundle.documents
+        } else if ExcerptSelector.isRelevant(query: trimmed, documents: activeDocuments) {
+            candidateDocuments = activeDocuments
+        }
+        let images = bundle?.images ?? []
+        var untrustedBlock: String?
+        if !candidateDocuments.isEmpty || !images.isEmpty {
+            let selection = candidateDocuments.isEmpty
+                ? ExcerptSelection.empty
+                : ExcerptSelector.select(documents: candidateDocuments, query: trimmed, budget: excerptBudget ?? 5_000)
+            var notes = bundle?.notes ?? []
+            for document in candidateDocuments { if let note = documentNotes[document.name] { notes.append(note) } }
+            let comparison = (asksToCompare && candidateDocuments.count >= 2) ? DocumentComparator.summary(of: candidateDocuments) : nil
+            untrustedBlock = UntrustedContent.block(selection: selection, documents: candidateDocuments, notes: notes,
+                                                    comparison: comparison, imageNames: images.map { $0.name })
+        }
+        let tainted = untrustedBlock != nil
         var firstUserSuffix = ""
 
         // 1) Orden explícita de memoria ("recuerda que…"): el usuario lo pidió con palabras.
@@ -114,14 +176,19 @@ public actor ConversationEngine {
             contextMemories = MemoryRetriever.context(query: trimmed, items: all, limit: config.memoryContextLimit, now: clock())
         }
 
-        let baseSystem = Persona.systemPrompt(PersonaContext(
-            now: clock(), timeZone: config.timeZone, engine: engine.descriptor, memories: contextMemories,
+        var baseSystem = Persona.systemPrompt(PersonaContext(
+            now: clock(), timeZone: config.timeZone, engine: brain.descriptor, memories: contextMemories,
             tools: availableTools(), claudeMode: config.claudeMode, spokenOutput: config.spokenOutput
         ))
+        if tainted { baseSystem += "\n\n" + UntrustedContent.systemRules }
         var system = baseSystem
 
-        var turns = Self.turns(from: Array(history.dropLast()), budget: config.historyCharBudget)
-        turns.append(ChatTurn(role: .user, content: trimmed + firstUserSuffix))
+        // El bloque de archivos ocupa parte de la petición: se recorta el historial para no pasarse del límite del proveedor.
+        let historyBudget = max(1_500, config.historyCharBudget - (untrustedBlock?.count ?? 0))
+        var turns = Self.turns(from: Array(history.dropLast()), budget: historyBudget)
+        var userContent = trimmed + firstUserSuffix
+        if let block = untrustedBlock { userContent = block + "\n\nPetición del usuario: " + userContent }
+        turns.append(ChatTurn(role: .user, content: userContent, images: images))
 
         var displayText = ""
         var emptyRetries = 0
@@ -144,7 +211,7 @@ public actor ConversationEngine {
 
             do {
                 let request = GenerationRequest(system: system, turns: turns)
-                for try await delta in engine.generate(request) {
+                for try await delta in brain.generate(request) {
                     if Task.isCancelled { return }
                     if rawRound.utf8.count < 20_000 { rawRound += delta }
                     var piece = leakGuard.feed(filter.feed(delta))
@@ -187,7 +254,7 @@ public actor ConversationEngine {
             if toolContents.isEmpty && filter.unterminatedBlocks == 0 { break }
 
             let executedBlocks = Array(toolContents.prefix(config.maxCallsPerRound))
-            var records: [ActionRecord] = await executeRound(executedBlocks, out)
+            var records: [ActionRecord] = await executeRound(executedBlocks, tainted: tainted, out)
             if Task.isCancelled { return }
             for content in executedBlocks {
                 if let call = ToolCallParser.parse(content) { executedCalls.insert(ToolCallRecovery.canonicalJSON(call)) }
@@ -222,7 +289,7 @@ public actor ConversationEngine {
                 out.yield(.delta(finalText))
             }
         }
-        let message = ChatMessage(role: .assistant, text: finalText, date: clock(), actions: actions, engineName: engine.descriptor.displayName)
+        let message = ChatMessage(role: .assistant, text: finalText, date: clock(), actions: actions, engineName: brain.descriptor.displayName)
         history.append(message)
         if history.count > maxStoredMessages { history.removeFirst(history.count - maxStoredMessages) }
         out.yield(.completed(message))
@@ -251,7 +318,7 @@ public actor ConversationEngine {
 
     /// Ejecuta las llamadas de una ronda. Las seguras e independientes corren en paralelo; las sensibles (con confirmación)
     /// y las de memoria van una a una y en orden. Devuelve los registros en el orden original de las llamadas.
-    private func executeRound(_ blocks: [String], _ out: AsyncStream<ConversationEvent>.Continuation) async -> [ActionRecord] {
+    private func executeRound(_ blocks: [String], tainted: Bool, _ out: AsyncStream<ConversationEvent>.Continuation) async -> [ActionRecord] {
         var parsed: [(index: Int, call: ToolCall)] = []
         var slots: [ActionRecord?] = Array(repeating: nil, count: blocks.count)
         for (index, block) in blocks.enumerated() {
@@ -269,7 +336,7 @@ public actor ConversationEngine {
             for item in parallel { out.yield(.toolStarted(item.call.name)) }
             await withTaskGroup(of: (Int, ActionRecord).self) { group in
                 for item in parallel {
-                    group.addTask { [self] in (item.index, await self.performWithRetry(item.call)) }
+                    group.addTask { [self] in (item.index, await self.performWithRetry(item.call, tainted: tainted)) }
                 }
                 for await (index, record) in group { slots[index] = record }
             }
@@ -278,16 +345,16 @@ public actor ConversationEngine {
         for item in parsed where !parallelIndexes.contains(item.index) {
             if Task.isCancelled { break }
             out.yield(.toolStarted(item.call.name))
-            slots[item.index] = await performWithRetry(item.call)
+            slots[item.index] = await performWithRetry(item.call, tainted: tainted)
         }
         return slots.compactMap { $0 }
     }
 
-    private func performWithRetry(_ call: ToolCall) async -> ActionRecord {
-        var record = await perform(call)
+    private func performWithRetry(_ call: ToolCall, tainted: Bool) async -> ActionRecord {
+        var record = await perform(call, tainted: tainted)
         if case .failed(let reason) = record.outcome, Self.isTransientFailure(reason), isParallelSafe(call), !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 600_000_000)
-            if !Task.isCancelled { record = await perform(call) }
+            if !Task.isCancelled { record = await perform(call, tainted: tainted) }
         }
         return record
     }
@@ -304,7 +371,7 @@ public actor ConversationEngine {
         }
     }
 
-    private func perform(_ call: ToolCall) async -> ActionRecord {
+    private func perform(_ call: ToolCall, tainted: Bool = false) async -> ActionRecord {
         var validated: ToolCall
         do {
             validated = try ToolValidator.validate(call, timeZone: config.timeZone)
@@ -342,12 +409,15 @@ public actor ConversationEngine {
             }
         }
 
-        if definition.risk.requiresConfirmation {
+        // Con contenido de archivos en la conversación, cualquier acción que no sea una consulta sin efectos exige confirmación:
+        // un archivo no puede autorizar nada (ni siquiera crear un recordatorio o preparar un borrador).
+        if definition.risk.requiresConfirmation || (tainted && definition.risk != .safe) {
             guard let confirmer = confirmer else {
                 return ActionRecord(tool: validated.name, summary: summary, outcome: .failed("No hay forma de pedir confirmación."), date: clock())
             }
             let approved = await confirmer.confirm(ConfirmationRequest(
-                tool: validated.name, title: Self.confirmationTitle(validated.name), detail: summary))
+                tool: validated.name, title: Self.confirmationTitle(validated.name),
+                detail: (tainted ? Self.taintedNote : "") + summary))
             guard approved else {
                 return ActionRecord(tool: validated.name, summary: summary, outcome: .declined, date: clock())
             }
@@ -514,10 +584,15 @@ public actor ConversationEngine {
         var used = 0
         for message in messages.reversed() where message.role != .tool {
             let role: ChatTurn.Role = message.role == .user ? .user : .assistant
-            let cost = message.text.count
+            var text = message.text
+            if let attachments = message.attachments, !attachments.isEmpty {
+                // El contenido de los archivos no se repite en los turnos anteriores: solo se recuerda que hubo adjuntos.
+                text += " [adjuntó: " + attachments.map { UntrustedContent.safeLabel($0.name, limit: 50) }.joined(separator: ", ") + "]"
+            }
+            let cost = text.count
             if used + cost > budget, !collected.isEmpty { break }
             used += cost
-            collected.append(ChatTurn(role: role, content: message.text))
+            collected.append(ChatTurn(role: role, content: text))
         }
         collected.reverse()
 

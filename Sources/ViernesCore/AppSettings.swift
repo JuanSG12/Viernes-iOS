@@ -62,6 +62,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var contactsRead: Bool?
     /// Dictado: revisión, glosario, correcciones aprendidas y transcripción en la nube. Opcional por la misma razón que `cloud`.
     public var speech: SpeechSettings?
+    /// Adjuntos: confirmación antes de enviarlos a la nube y modelo de visión por proveedor. Opcional por la misma razón que `cloud`.
+    public var attachments: AttachmentSettings?
 
     public var calendarReadEnabled: Bool { calendarRead ?? false }
     public var contactsReadEnabled: Bool { contactsRead ?? false }
@@ -103,6 +105,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         if let id = selectedModelID, ModelCatalog.descriptor(id: id) == nil { copy.selectedModelID = nil }
         copy.cloud = cloud?.sanitized()
         copy.speech = speech?.sanitized()
+        copy.attachments = attachments?.sanitized()
         if claude.shortcutName.trimmingCharacters(in: .whitespaces).isEmpty { copy.claude.shortcutName = ClaudeBridgeConfig().shortcutName }
         return copy
     }

@@ -115,12 +115,12 @@ foreach ($f in $swiftFiles) {
 if ($balanceErrors -eq 0) { Ok "todos los archivos Swift tienen delimitadores y cadenas balanceados" }
 
 # ---------------------------------------------------------------- 2. El core es portable (solo Foundation)
-Write-Host "`n[2] ViernesCore solo importa Foundation"
+Write-Host "`n[2] ViernesCore solo importa Foundation (FoundationXML solo bajo #if canImport, para XMLParser fuera de Apple)"
 $checks++
 $coreBad = 0
 foreach ($f in $swiftFiles | Where-Object { $_.FullName -match '[\\/]Sources[\\/]ViernesCore[\\/]' }) {
     foreach ($m in [regex]::Matches([System.IO.File]::ReadAllText($f.FullName), '(?m)^\s*import\s+(\w+)')) {
-        if ($m.Groups[1].Value -ne 'Foundation') { Fail "$($f.Name) importa $($m.Groups[1].Value)"; $coreBad++ }
+        if ($m.Groups[1].Value -ne 'Foundation' -and $m.Groups[1].Value -ne 'FoundationXML') { Fail "$($f.Name) importa $($m.Groups[1].Value)"; $coreBad++ }
     }
 }
 if ($coreBad -eq 0) { Ok "ningún framework de Apple fuera de Foundation en el core" }

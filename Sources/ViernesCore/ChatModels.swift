@@ -59,9 +59,12 @@ public struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     public var actions: [ActionRecord]
     /// Nombre del modelo/motor que produjo la respuesta (transparencia sobre qué cerebro respondió).
     public var engineName: String?
+    /// Metadatos de los archivos adjuntos (el contenido no se guarda en el historial).
+    public var attachments: [AttachmentRef]?
 
     public init(id: UUID = UUID(), role: ChatRole, text: String, date: Date = Date(),
-                actions: [ActionRecord] = [], engineName: String? = nil) {
+                actions: [ActionRecord] = [], engineName: String? = nil, attachments: [AttachmentRef]? = nil) {
+        self.attachments = attachments
         self.id = id
         self.role = role
         self.text = text
@@ -76,9 +79,12 @@ public struct ChatTurn: Equatable, Sendable {
     public enum Role: String, Sendable { case user, assistant }
     public var role: Role
     public var content: String
-    public init(role: Role, content: String) {
+    /// Imágenes del turno (solo los motores con visión las reciben).
+    public var images: [ImagePart]
+    public init(role: Role, content: String, images: [ImagePart] = []) {
         self.role = role
         self.content = content
+        self.images = images
     }
 }
 

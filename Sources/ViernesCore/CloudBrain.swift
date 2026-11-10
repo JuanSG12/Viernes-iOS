@@ -90,9 +90,19 @@ public enum OpenAIChatProtocol {
     }
 
     public static func requestBody(model: String, system: String, turns: [ChatTurn], maxTokens: Int, temperature: Double) throws -> Data {
-        var messages: [[String: String]] = [["role": "system", "content": system]]
+        var messages: [[String: Any]] = [["role": "system", "content": system]]
         for turn in turns {
-            messages.append(["role": turn.role == .user ? "user" : "assistant", "content": turn.content])
+            let role = turn.role == .user ? "user" : "assistant"
+            if turn.images.isEmpty {
+                messages.append(["role": role, "content": turn.content])
+            } else {
+                // Formato multimodal de la API compatible con OpenAI: texto + una parte `image_url` por imagen (URL de datos en base64).
+                var parts: [[String: Any]] = [["type": "text", "text": turn.content]]
+                for image in turn.images {
+                    parts.append(["type": "image_url", "image_url": ["url": image.dataURL]])
+                }
+                messages.append(["role": role, "content": parts])
+            }
         }
         var body: [String: Any] = [
             "model": model,
