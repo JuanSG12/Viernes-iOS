@@ -324,7 +324,7 @@ struct ImportProfileSheet: View {
                     Text("Los recuerdos pendientes no se le dan al modelo hasta que los apruebes en Memoria. Un archivo ajeno o manipulado podría traer textos pensados para dirigir al asistente.")
                         .font(.footnote).foregroundStyle(Theme.textSecondary)
                     Toggle("Confiar en las instrucciones personales y la pronunciación del archivo", isOn: $trustPersonalization)
-                    Text("Apagado: se importan sin ellas. Siempre quedan apagados los permisos de calendario y contactos, la escucha por voz, el dictado en servidores, la voz en la nube, Claude y el envío de adjuntos sin preguntar: los activas tú en el perfil nuevo.")
+                    Text("Apagado: se importan sin ellas. Siempre quedan apagados los permisos de calendario y contactos, la escucha por voz, el dictado en servidores, la voz en la nube y el envío de adjuntos sin preguntar, y la configuración de Claude vuelve a la de fábrica: lo activas tú en el perfil nuevo.")
                         .font(.footnote).foregroundStyle(Theme.textSecondary)
                 }
                 .listRowBackground(Theme.carbon.opacity(0.5))
