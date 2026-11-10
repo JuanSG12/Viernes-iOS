@@ -288,8 +288,10 @@ final class ViernesUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Borrar pide confirmación")
         confirm.tap()
 
-        // Ya no aparece al buscar lo mismo.
-        XCTAssertFalse(app.buttons["library-hit"].firstMatch.waitForExistence(timeout: 4), "Lo borrado deja de aparecer en las búsquedas")
+        // Ya no aparece al buscar lo mismo. El borrado y la nueva búsqueda son asíncronos: el resultado viejo sigue en pantalla unos
+        // instantes, así que se ESPERA a que desaparezca (`waitForExistence` devolvería «sí existe» al instante).
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["library-hit"].firstMatch)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 15), .completed, "Lo borrado deja de aparecer en las búsquedas")
     }
 
     func testPermissionsScreenListsEachPermissionWithItsReason() {
