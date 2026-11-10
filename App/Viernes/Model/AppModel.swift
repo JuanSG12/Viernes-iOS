@@ -98,6 +98,8 @@ final class AppModel: ObservableObject {
     let mailDrafts = MailDraftCenter()
     /// Historial local de reconocimiento de voz, para diagnóstico.
     let recognition = RecognitionHistory()
+    /// Métricas de los últimos turnos de voz (informe de rendimiento).
+    let voiceMetrics = VoiceMetricsStore()
     private let claude = ClaudeCoordinator()
     /// Ejecutor de herramientas del dispositivo (también lo usa la pantalla de Permisos para el diagnóstico del calendario).
     private let tools: DeviceToolExecutor
@@ -223,6 +225,7 @@ final class AppModel: ObservableObject {
         speaker.onWord = { [weak self] in self?.speakPulse = Date() }
         speaker.onFinish = { [weak self] in self?.speechFinished() }
         speaker.onCloudError = { [weak self] message in self?.showBanner(message) }
+        speaker.onTurnMetrics = { [weak self] metrics in self?.voiceMetrics.add(metrics) }
         claude.onResult = { [weak self] prompt, answer in self?.claudeAnswered(prompt: prompt, answer: answer) }
         claude.onCancelled = { [weak self] in self?.showBanner("El Atajo de Claude no devolvió texto. Revisa la respuesta en la app de Claude.") }
     }
@@ -376,7 +379,7 @@ final class AppModel: ObservableObject {
         switch coreState {
         case .listening:
             if listener.mode == .command { listener.finishNow() } else { stopEverything() }
-        case .speaking: interrupt()
+        case .speaking: interruptAndListen()
         case .thinking: cancelGeneration(); coreState = .idle
         default: Task { await startListening() }
         }
@@ -605,6 +608,15 @@ final class AppModel: ObservableObject {
         refreshWakeWord()
     }
 
+    /// Tocar mientras Viernes habla: la corta al instante (y con ella la respuesta que siguiera generándose) y abre el micrófono
+    /// para la nueva instrucción. Lo que quedara por decir de la respuesta anterior no se reproduce.
+    func interruptAndListen() {
+        speaker.stop()
+        cancelGeneration()
+        coreState = .idle
+        Task { await startListening() }
+    }
+
     private func stopEverything() {
         listener.stop()
         speaker.stop()
@@ -694,8 +706,9 @@ final class AppModel: ObservableObject {
     }
 
     private func runGeneration(_ text: String) async {
-        var streamer = SentenceStreamer()
         let speak = settings.voice.speakResponses
+        // Un turno de habla por respuesta: el texto se envía a la voz según se genera, sin esperar al final.
+        if speak { speaker.beginTurn() }
         for await event in await conversation.send(text) {
             if Task.isCancelled { return }
             switch event {
@@ -705,13 +718,13 @@ final class AppModel: ObservableObject {
                 activeTool = name
             case .delta(let delta):
                 streamingText += delta
-                if speak { for sentence in streamer.feed(delta) { speaker.enqueue(sentence) } }
+                if speak { speaker.feed(delta) }
             case .action(let record):
                 activeTool = nil
                 liveActions.append(record)
             case .completed(let message):
                 activeTool = nil
-                if speak, let rest = streamer.flush() { speaker.enqueue(rest) }
+                if speak { speaker.endTurn() }
                 messages.append(message)
                 streamingText = ""
                 liveActions = []
@@ -719,6 +732,7 @@ final class AppModel: ObservableObject {
             case .failed(let reason):
                 activeTool = nil
                 streamingText = ""
+                if speak { speaker.endTurn(flush: false) }
                 appendSystemNotice(reason)
                 enterError()
             }
@@ -727,6 +741,7 @@ final class AppModel: ObservableObject {
 
     func cancelGeneration() {
         generationID += 1
+        speaker.stop()                      // si había un turno de habla abierto, se corta con la generación
         generationTask?.cancel()
         generationTask = nil
         transcribeTask?.cancel()

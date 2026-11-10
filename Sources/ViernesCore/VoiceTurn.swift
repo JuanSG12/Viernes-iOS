@@ -25,11 +25,12 @@ public struct VoiceTurnLedger: Sendable {
     public private(set) var nextIndex = 0
     public private(set) var textEnded = true
     public private(set) var cancelled = false
+    /// Lo enviado a la conexión vigente y lo que el sintetizador confirmó haber convertido en audio.
+    private var tracker = SpokenTextTracker()
     /// Caracteres enviados al sintetizador (con el espacio final de cada fragmento).
-    public private(set) var sentCharacters = 0
+    public var sentCharacters: Int { tracker.sentCharacters }
     /// Caracteres que el sintetizador confirmó haber convertido en audio (alineación de ElevenLabs).
-    public private(set) var spokenCharacters = 0
-    private var sent: [String] = []
+    public var spokenCharacters: Int { tracker.spokenCharacters }
 
     public init() {}
 
@@ -39,10 +40,15 @@ public struct VoiceTurnLedger: Sendable {
         nextIndex = 0
         textEnded = false
         cancelled = false
-        sentCharacters = 0
-        spokenCharacters = 0
-        sent = []
+        tracker = SpokenTextTracker()
         return currentTurn
+    }
+
+    /// Tras un corte de conexión se abre otra: la contabilidad empieza de nuevo, con el texto pendiente como lo único enviado.
+    public mutating func restartSession(carrying pending: String) {
+        tracker = SpokenTextTracker()
+        let text = pending.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { tracker.append(text) }
     }
 
     public func isCurrent(_ turn: UInt64) -> Bool { turn == currentTurn && !cancelled }
@@ -54,8 +60,7 @@ public struct VoiceTurnLedger: Sendable {
         if segment.index < nextIndex { return .duplicate }
         if segment.index > nextIndex { return .outOfOrder }
         nextIndex += 1
-        sent.append(segment.text)
-        sentCharacters += segment.text.count + 1
+        tracker.append(segment.text)
         return .accepted
     }
 
@@ -75,15 +80,37 @@ public struct VoiceTurnLedger: Sendable {
     }
 
     public mutating func recordSpoken(characters: Int, turn: UInt64) {
-        guard isCurrent(turn), characters > 0 else { return }
-        spokenCharacters = min(spokenCharacters + characters, sentCharacters)
+        guard isCurrent(turn) else { return }
+        tracker.spoken(characters)
     }
 
     /// Texto enviado que todavía no se convirtió en audio (para retomarlo tras un corte de conexión sin repetir lo ya dicho).
+    public func remainingText() -> String { tracker.remainingText() }
+}
+
+/// Lleva la cuenta del texto enviado a UNA conexión del sintetizador y de cuánto de él ya es audio, para poder retomar lo que
+/// falte tras un corte sin repetir lo ya dicho.
+public struct SpokenTextTracker: Sendable {
+    private var texts: [String] = []
+    public private(set) var sentCharacters = 0
+    public private(set) var spokenCharacters = 0
+
+    public init() {}
+
+    /// Registra un texto enviado (la API pide un espacio final por mensaje, que también cuenta).
+    public mutating func append(_ text: String) {
+        texts.append(text)
+        sentCharacters += text.count + 1
+    }
+
+    public mutating func spoken(_ characters: Int) {
+        guard characters > 0 else { return }
+        spokenCharacters = min(spokenCharacters + characters, sentCharacters)
+    }
+
     /// Si el corte cae a media palabra, se retoma en la siguiente palabra.
     public func remainingText() -> String {
-        let all = sent.map { $0 + " " }.joined()
-        let characters = Array(all)
+        let characters = Array(texts.map { $0 + " " }.joined())
         let cut = min(spokenCharacters, characters.count)
         var start = cut
         if cut > 0, cut < characters.count, !characters[cut - 1].isWhitespace, !characters[cut].isWhitespace {

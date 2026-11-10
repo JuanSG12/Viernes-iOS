@@ -25,6 +25,8 @@ Nada de esto se ha probado todavía en un iPhone (ver [INSTALL.md](INSTALL.md#pr
 
 ## Síntesis de voz (salida)
 
+> **0.7**: la salida de voz se rehízo como un motor por turnos con streaming (WebSocket de ElevenLabs, reproducción continua, cancelación inmediata, respaldo a la voz del sistema y métricas). Lo de abajo describe la base original; el diseño vigente, la auditoría y la decisión sobre modelos están en **VOICE_ENGINE.md**.
+
 **Implementado**: `AVSpeechSynthesizer` — voces del sistema, 100 % locales (por defecto). Opcionalmente, voz neuronal de ElevenLabs en la nube (ver más abajo).
 
 - **Selección automática** (`VoiceRanker`): solo español; puntaje por variante (es-CO ≫ es-MX/es-US/es-419 > otras latinas > es-ES), femenina, y calidad **Premium > Mejorada > Estándar**. Se penalizan las voces *eloquence* y de novedad (suenan robóticas). Si descargas una voz Premium, será la elegida.

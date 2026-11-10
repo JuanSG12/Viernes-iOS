@@ -1,19 +1,74 @@
 import AVFoundation
 import ViernesCore
 
-/// Síntesis de voz con AVSpeechSynthesizer: voces locales del sistema (sin red), cola por frases, pausas e interrupción.
-/// Para una voz más natural, el usuario descarga voces «Mejoradas» o «Premium» en Ajustes › Accesibilidad › Contenido hablado › Voces.
+/// Voz de Viernes. Coordina CADA TURNO de habla, desde que el modelo empieza a escribir hasta que suena la última palabra:
+///
+/// - **Tiempo real (ElevenLabs por WebSocket)**: el texto se corta en unidades naturales (`SpeechSegmenter`) y se envía a la
+///   conexión según se genera; el audio PCM llega por streaming y suena de forma continua (`RealtimePCMPlayer`). Se empieza a
+///   hablar sin esperar al final de la respuesta.
+/// - **Por frases (ElevenLabs por HTTP)**: el envío anterior, una petición por frase. Solo si el usuario apaga el tiempo real.
+/// - **Voz del sistema (`AVSpeechSynthesizer`)**: sin red. También es el respaldo si la nube falla: lo que falte se dice con ella,
+///   sin repetir lo ya dicho y sin solaparse.
+///
+/// Cada turno tiene un identificador (`VoiceTurnLedger`): interrumpir lo cancela y todo lo que llegue después de ese turno
+/// (fragmentos, audio, eventos de red) se descarta. Mide cada turno (`VoiceTurnRecorder`) para saber DÓNDE se pierde el tiempo.
+/// Para una voz del sistema más natural, descarga voces «Mejoradas» o «Premium» en Ajustes › Accesibilidad › Contenido hablado.
 @MainActor
 final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     var onStart: (() -> Void)?
-    var onFinish: (() -> Void)?               // se vació la cola (terminó de hablar o fue interrumpida)
-    var onWord: (() -> Void)?                 // pulso por palabra: anima el núcleo
+    var onFinish: (() -> Void)?               // terminó el turno (habló todo o fue interrumpido)
+    var onWord: (() -> Void)?                 // pulso: anima el núcleo
     /// La voz neuronal falló y se usó la del sistema (se avisa una vez por configuración).
     var onCloudError: ((String) -> Void)?
+    /// Un turno terminó: sus métricas (para el informe de rendimiento de voz).
+    var onTurnMetrics: ((VoiceTurnMetrics) -> Void)?
 
     private let synthesizer = AVSpeechSynthesizer()
+    private let player = RealtimePCMPlayer()
 
-    // Voz neuronal (ElevenLabs): cola de frases con un máximo de 2 descargas simultáneas (límite del plan gratuito).
+    private enum Mode {
+        case realtime, rest, system
+        var label: String {
+            switch self {
+            case .realtime: return "tiempo real"
+            case .rest: return "por frases (HTTP)"
+            case .system: return "voz del sistema"
+            }
+        }
+    }
+
+    /// Un turno en curso. Es una clase para poder pasarla a las funciones sin copiar su estado.
+    private final class Turn {
+        let id: UInt64
+        let mode: Mode
+        let cloud: ElevenLabsSettings?
+        let speed: Double
+        var segmenter = SpeechSegmenter()
+        var recorder: VoiceTurnRecorder
+        var session: RealtimeTTSSession?
+        var connection = 0
+        var playerGeneration = 0
+        var textEnded = false
+        var sessionFinal = false
+        var playerDrained = false
+        var fellBack = false
+        var reconnects = 0
+        var speakingStarted = false
+        var heldSystem: [SpeechChunk] = []
+        init(id: UInt64, mode: Mode, cloud: ElevenLabsSettings?, speed: Double, recorder: VoiceTurnRecorder) {
+            self.id = id
+            self.mode = mode
+            self.cloud = cloud
+            self.speed = speed
+            self.recorder = recorder
+        }
+    }
+
+    private var turn: Turn?
+    private var ledger = VoiceTurnLedger()
+    private var lastPulse = Date.distantPast
+
+    // Voz neuronal por frases (HTTP): cola de frases con un máximo de 2 descargas simultáneas (límite del plan gratuito).
     private struct CloudJob {
         let id = UUID()
         let chunk: SpeechChunk
@@ -27,18 +82,22 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     private var cloudRunnerToken: UUID?
     private var cloudSuspended = false
     private var cloudAnnounced = false
-    /// Frases vivas (encoladas o sonando). Los `didCancel` tardíos de frases ya descartadas por `stop()` se ignoran
-    /// porque su identificador ya no está aquí.
+    /// Frases vivas de la voz del sistema (encoladas o sonando). Los `didCancel` tardíos de frases ya descartadas por `stop()`
+    /// se ignoran porque su identificador ya no está aquí.
     private var live = Set<ObjectIdentifier>()
     private(set) var isSpeaking = false
-    /// Hay frases encoladas o sonando (incluye el instante antes de que empiece la primera).
-    var isBusy: Bool { isSpeaking || !live.isEmpty || !cloudJobs.isEmpty || cloudRunner != nil }
+    /// Hay un turno en curso o frases encoladas o sonando (incluye el instante antes de que empiece la primera).
+    var isBusy: Bool { turn != nil || isSpeaking || !live.isEmpty || !cloudJobs.isEmpty || cloudRunner != nil }
     private var settings: VoiceSettings = .default
 
     override init() {
         super.init()
         synthesizer.delegate = self
+        wirePlayer()
+        AudioSessionWatcher.shared.onEvent = { [weak self] event in self?.audioSessionEvent(event) }
     }
+
+    private var uptime: Double { ProcessInfo.processInfo.systemUptime }
 
     // MARK: Voces
 
@@ -70,7 +129,7 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         return AVSpeechSynthesisVoice(language: "es-MX")
     }
 
-    // MARK: Reproducción
+    // MARK: Ajustes
 
     func apply(_ settings: VoiceSettings) {
         self.settings = settings.sanitized()
@@ -83,22 +142,323 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         return CloudKeyStore.hasKey(providerID: ElevenLabsProtocol.keyProviderID)
     }
 
-    /// Encola una frase (usado por la respuesta en streaming) o un texto completo.
-    func enqueue(_ text: String) {
-        let chunks = SpeechText.chunks(text)
-        guard !chunks.isEmpty else { return }
-        try? AudioSessionController.activateForConversation()
-        if cloudActive, let cloud = settings.elevenLabs {
-            let speed = ElevenLabsProtocol.speed(forRate: settings.rate)
-            for chunk in chunks { cloudJobs.append(CloudJob(chunk: chunk, settings: cloud, speed: speed)) }
-            prefetchCloud()
-            startCloudRunner()
-            return
+    // MARK: Turnos
+
+    /// Empieza un turno de habla. Si había uno en curso, se cancela sin avisar (el nuevo lo sustituye).
+    func beginTurn() {
+        if turn != nil || isBusy { cancelEverything(outcome: .cancelled, notify: false) }
+        try? AudioSessionController.ensureConversationActive()      // una vez por turno, no por frase
+        let id = ledger.beginTurn()
+        var mode = Mode.system
+        var cloud: ElevenLabsSettings?
+        if cloudActive, let configured = settings.elevenLabs {
+            cloud = configured
+            mode = configured.realtimeEnabled ? .realtime : .rest
         }
-        enqueueSystem(chunks)
+        let recorder = VoiceTurnRecorder(turn: id, backend: mode.label, startedAt: uptime)
+        let created = Turn(id: id, mode: mode, cloud: cloud, speed: ElevenLabsProtocol.speed(forRate: settings.rate), recorder: recorder)
+        turn = created
+        if mode == .realtime { created.playerGeneration = player.beginTurn() }
     }
 
-    // MARK: Voz neuronal
+    /// Texto nuevo del modelo (un delta). Se corta en fragmentos y se habla según se va completando.
+    func feed(_ delta: String) {
+        guard let current = turn, !current.textEnded, !delta.isEmpty else { return }
+        current.recorder.firstToken(at: uptime)
+        for segment in current.segmenter.feed(delta) { route(segment, in: current) }
+    }
+
+    /// El modelo terminó. `flush`: decir también lo que quede sin cerrar (falso si la respuesta falló).
+    func endTurn(flush: Bool = true) {
+        guard let current = turn, !current.textEnded else { return }
+        if flush { for segment in current.segmenter.flush() { route(segment, in: current) } }
+        current.textEnded = true
+        _ = ledger.endText(turn: current.id)
+        if current.mode == .realtime, !current.fellBack {
+            if let session = current.session { session.finishText() } else { player.finishInput(generation: current.playerGeneration) }
+        }
+        completeIfDone(current)
+    }
+
+    /// Dice un texto completo (repetir una respuesta, muestras de voz): un turno de una sola vez.
+    func enqueue(_ text: String) {
+        beginTurn()
+        feed(text)
+        endTurn()
+    }
+
+    /// Interrumpe AL INSTANTE y descarta todo lo pendiente.
+    func stop() {
+        guard isBusy else { return }
+        cancelEverything(outcome: .interrupted, notify: true)
+    }
+
+    // MARK: Encaminar fragmentos
+
+    private func route(_ segment: SpeechSegment, in current: Turn) {
+        switch ledger.accept(segment, turn: current.id) {
+        case .accepted: break
+        case .duplicate, .outOfOrder, .afterEnd:
+            current.recorder.discarded()
+            return
+        case .stale, .cancelled:
+            return
+        }
+        current.recorder.segmentReady(at: uptime, characters: segment.text.count)
+        let chunk = SpeechChunk(text: segment.text, pauseAfter: segment.pauseAfter)
+        switch current.mode {
+        case .realtime:
+            if current.fellBack { sendToSystem(chunk, in: current) } else { sendRealtime(chunk.text, in: current) }
+        case .rest:
+            if let cloud = current.cloud {
+                cloudJobs.append(CloudJob(chunk: chunk, settings: cloud, speed: current.speed))
+                prefetchCloud()
+                startCloudRunner()
+            }
+        case .system:
+            enqueueSystem([chunk])
+        }
+    }
+
+    // MARK: Tiempo real (WebSocket)
+
+    private func sendRealtime(_ text: String, in current: Turn) {
+        if current.session == nil, !openSession(for: current) { return }
+        current.session?.send(text: text)
+    }
+
+    /// Abre la conexión del turno. `false` si no se pudo (falta la clave o la voz): entonces se habla con la voz del sistema.
+    @discardableResult
+    private func openSession(for current: Turn) -> Bool {
+        guard let cloud = current.cloud,
+              let key = CloudKeyStore.read(providerID: ElevenLabsProtocol.keyProviderID),
+              let url = ElevenLabsRealtime.websocketURL(voiceID: cloud.voiceID, modelID: cloud.modelID) else {
+            fallBack(current, message: "Falta la clave o la voz de ElevenLabs. Revisa Voz y habla › Voz neuronal.", fatal: true)
+            return false
+        }
+        current.connection += 1
+        let connection = current.connection
+        let turnID = current.id
+        let generation = current.playerGeneration
+        let player = self.player
+        let session = RealtimeTTSSession(
+            url: url, apiKey: key, initialMessage: ElevenLabsRealtime.initialMessage(speed: current.speed),
+            onAudio: { data in player.append(data, generation: generation) },       // directo y en orden, sin pasar por el hilo principal
+            onTerminal: { [weak self] terminal in
+                Task { @MainActor in self?.sessionEnded(terminal, turnID: turnID, connection: connection) }
+            })
+        current.session = session
+        session.start()
+        return true
+    }
+
+    private func sessionEnded(_ terminal: RealtimeTTSSession.Terminal, turnID: UInt64, connection: Int) {
+        guard let current = turn, current.id == turnID, current.connection == connection, ledger.isCurrent(turnID) else { return }
+        switch terminal {
+        case .final:
+            current.sessionFinal = true
+            player.finishInput(generation: current.playerGeneration)
+        case .failure(let message, let fatal):
+            current.recorder.connectionError()
+            Diagnostics.shared.log("voz: la conexión de ElevenLabs falló (\(fatal ? "fatal" : "recuperable")): \(message)")
+            recover(current, message: message, fatal: fatal)
+        }
+    }
+
+    /// La conexión se cortó a medias: se reconecta UNA vez retomando solo lo que no se había dicho; si no, voz del sistema.
+    private func recover(_ current: Turn, message: String, fatal: Bool) {
+        let session = current.session
+        // Sin la alineación del servidor no se sabe hasta dónde llegó el audio: antes que repetir lo dicho, se descarta lo
+        // enviado y no resuelto (nunca se repite una frase).
+        let knowsProgress = (session?.spokenCharacters ?? 0) > 0 || (session?.receivedAudioChunks ?? 0) == 0
+        ledger.recordSpoken(characters: session?.spokenCharacters ?? 0, turn: current.id)
+        let pending = knowsProgress ? ledger.remainingText() : ""
+        if !knowsProgress { current.recorder.discarded() }
+        session?.cancel()
+        current.session = nil
+
+        if !fatal, current.reconnects < 1 {
+            current.reconnects += 1
+            current.recorder.reconnected()
+            ledger.restartSession(carrying: pending)
+            if !pending.isEmpty {
+                // La conexión nueva retoma lo pendiente; si el texto ya terminó, también se cierra.
+                if openSession(for: current) {
+                    current.session?.send(text: pending)
+                    if current.textEnded { current.session?.finishText() }
+                }
+            } else if current.textEnded {
+                player.finishInput(generation: current.playerGeneration)       // no queda nada por decir
+            }
+            // Sin nada pendiente y con el texto aún abierto, la conexión se abre con el próximo fragmento.
+            return
+        }
+        fallBack(current, message: message, fatal: fatal, pending: pending)
+    }
+
+    /// Pasa el resto del turno a la voz del sistema. Lo que ya esté en el colchón de audio termina de sonar antes, para no solaparse.
+    private func fallBack(_ current: Turn, message: String, fatal: Bool, pending: String? = nil) {
+        guard !current.fellBack else { return }
+        current.fellBack = true
+        current.recorder.fellBack()
+        if fatal { cloudSuspended = true }
+        announceCloudProblem(message)
+        current.session?.cancel()
+        current.session = nil
+        let tail = pending ?? ledger.remainingText()
+        if !tail.isEmpty { current.heldSystem.append(contentsOf: SpeechText.chunks(tail)) }
+        player.finishInput(generation: current.playerGeneration)           // deja sonar lo que ya llegó y avisa al vaciarse
+        if current.playerDrained { releaseHeldSystem(current) }
+    }
+
+    private func sendToSystem(_ chunk: SpeechChunk, in current: Turn) {
+        if current.playerDrained { enqueueSystem([chunk]) } else { current.heldSystem.append(chunk) }
+    }
+
+    private func releaseHeldSystem(_ current: Turn) {
+        let held = current.heldSystem
+        current.heldSystem = []
+        if !held.isEmpty { enqueueSystem(held) }
+        completeIfDone(current)
+    }
+
+    private func announceCloudProblem(_ message: String) {
+        guard !cloudAnnounced else { return }
+        cloudAnnounced = true
+        onCloudError?(message)
+    }
+
+    // MARK: Reproductor (eventos de la cola de audio)
+
+    private func wirePlayer() {
+        player.onFirstAudio = { [weak self] generation, time in
+            Task { @MainActor in self?.playerStarted(generation: generation, at: time) }
+        }
+        player.onGap = { [weak self] generation, milliseconds in
+            Task { @MainActor in
+                guard let self = self, let current = self.turn, current.playerGeneration == generation else { return }
+                current.recorder.gap(ms: milliseconds)
+            }
+        }
+        player.onScheduled = { [weak self] generation, bytes, milliseconds in
+            Task { @MainActor in
+                guard let self = self, let current = self.turn, current.playerGeneration == generation else { return }
+                current.recorder.audioScheduled(bytes: bytes, durationMs: milliseconds)
+            }
+        }
+        player.onDrained = { [weak self] generation in
+            Task { @MainActor in self?.playerDrained(generation: generation) }
+        }
+        player.onPulse = { [weak self] in
+            Task { @MainActor in self?.pulse() }
+        }
+        player.onEngineReset = { [weak self] generation in
+            Task { @MainActor in
+                guard let self = self, let current = self.turn, current.playerGeneration == generation else { return }
+                Diagnostics.shared.log("voz: cambió la ruta de audio durante la voz; se corta el turno")
+                self.cancelEverything(outcome: .interrupted, notify: true)
+            }
+        }
+        player.onFailure = { [weak self] generation, reason in
+            Task { @MainActor in
+                guard let self = self, let current = self.turn, current.playerGeneration == generation else { return }
+                Diagnostics.shared.log("voz: no arrancó el motor de audio: \(reason)")
+                current.recorder.connectionError()
+                self.fallBack(current, message: "No pude abrir el audio en tiempo real: hablo con la voz de Apple.", fatal: false, pending: nil)
+            }
+        }
+    }
+
+    private func playerStarted(generation: Int, at time: Double) {
+        guard let current = turn, current.playerGeneration == generation, current.mode == .realtime else { return }
+        current.recorder.firstAudio(at: time)
+        markSpeaking(current)
+    }
+
+    private func playerDrained(generation: Int) {
+        guard let current = turn, current.playerGeneration == generation, current.mode == .realtime else { return }
+        current.playerDrained = true
+        if current.fellBack { releaseHeldSystem(current) } else { completeIfDone(current) }
+    }
+
+    private func pulse() {
+        let time = Date()
+        guard time.timeIntervalSince(lastPulse) > 0.06 else { return }
+        lastPulse = time
+        onWord?()
+    }
+
+    private func markSpeaking(_ current: Turn) {
+        current.speakingStarted = true
+        if !isSpeaking {
+            isSpeaking = true
+            onStart?()
+        }
+    }
+
+    // MARK: Fin y cancelación
+
+    /// ¿Terminó el turno? Cuando el texto se acabó y el audio de todos los caminos ya sonó.
+    private func completeIfDone(_ current: Turn) {
+        guard turn === current, current.textEnded else { return }
+        switch current.mode {
+        case .realtime:
+            guard current.playerDrained, current.heldSystem.isEmpty, live.isEmpty else { return }
+            if !current.fellBack, current.session != nil, !current.sessionFinal { return }
+        case .rest:
+            guard cloudJobs.isEmpty, cloudRunner == nil, live.isEmpty else { return }
+        case .system:
+            guard live.isEmpty else { return }
+        }
+        finishTurn(current, outcome: .completed)
+    }
+
+    private func finishTurn(_ current: Turn, outcome: VoiceTurnMetrics.Outcome) {
+        guard turn === current else { return }
+        current.recorder.finish(at: uptime, outcome: outcome)
+        let metrics = current.recorder.metrics
+        let spoke = current.speakingStarted
+        turn = nil
+        isSpeaking = false
+        onTurnMetrics?(metrics)
+        if spoke { onFinish?() }
+    }
+
+    /// Corta todo (interrupción, turno nuevo, problema de audio): silencio inmediato y turno invalidado.
+    private func cancelEverything(outcome: VoiceTurnMetrics.Outcome, notify: Bool) {
+        let current = turn
+        let wasSpeaking = isSpeaking || current != nil
+        current?.recorder.interrupted(at: uptime)
+        ledger.cancel()
+        current?.session?.cancel()
+        current?.session = nil
+        player.stop()                                      // sincrónico: cuando vuelve, no suena nada de la nube
+        stopCloud()
+        live.removeAll()                                   // los callbacks de cancelación que lleguen después se ignorarán
+        synthesizer.stopSpeaking(at: .immediate)
+        current?.recorder.silenced(at: uptime)
+        if let current = current {
+            current.recorder.finish(at: uptime, outcome: outcome)
+            onTurnMetrics?(current.recorder.metrics)
+        }
+        turn = nil
+        isSpeaking = false
+        if notify, wasSpeaking { onFinish?() }
+    }
+
+    /// Eventos del sistema de audio que afectan a lo que se está diciendo.
+    private func audioSessionEvent(_ event: AudioSessionWatcher.Event) {
+        switch event {
+        case .interruptionBegan, .outputLost, .mediaServicesReset:
+            guard isBusy else { return }
+            Diagnostics.shared.log("voz: interrupción del sistema de audio (\(event)); se detiene la voz")
+            stop()
+        case .interruptionEnded, .routeChanged:
+            break
+        }
+    }
+
+    // MARK: Voz neuronal por frases (HTTP)
 
     private func prefetchCloud() {
         guard !cloudSuspended else { return }
@@ -117,10 +477,7 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     private func handleCloudFailure(_ failure: ElevenLabsClient.Failure) {
         if failure.fatal { cloudSuspended = true }
-        if !cloudAnnounced {
-            cloudAnnounced = true
-            onCloudError?(failure.message)
-        }
+        announceCloudProblem(failure.message)
     }
 
     private func runCloudQueue(token: UUID) async {
@@ -138,8 +495,11 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
             cloudFetches[job.id] = nil
 
             if let audio = audio {
-                if !isSpeaking { isSpeaking = true; onStart?() }
-                cloudPlayer.onTick = { [weak self] in self?.onWord?() }
+                if let current = turn {
+                    current.recorder.firstAudio(at: uptime)
+                    markSpeaking(current)
+                } else if !isSpeaking { isSpeaking = true; onStart?() }
+                cloudPlayer.onTick = { [weak self] in self?.pulse() }
                 _ = await cloudPlayer.play(audio, volume: settings.volume)
                 if Task.isCancelled { break }
                 let pause = job.chunk.pauseAfter * settings.pauseScale
@@ -153,10 +513,7 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         guard cloudRunnerToken == token else { return }       // stop() ya limpió y quizá arrancó otra cola
         cloudRunner = nil
         cloudRunnerToken = nil
-        if isSpeaking, live.isEmpty, cloudJobs.isEmpty {
-            isSpeaking = false
-            onFinish?()
-        }
+        if let current = turn { completeIfDone(current) }
     }
 
     private func stopCloud() {
@@ -186,16 +543,6 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    /// Interrumpe al instante y vacía la cola.
-    func stop() {
-        guard synthesizer.isSpeaking || !live.isEmpty || !cloudJobs.isEmpty || cloudRunner != nil else { return }
-        stopCloud()
-        live.removeAll()                       // los callbacks de cancelación que lleguen después se ignorarán
-        synthesizer.stopSpeaking(at: .immediate)
-        isSpeaking = false
-        onFinish?()
-    }
-
     /// Reproduce una muestra con los ajustes dados (pantalla de voces).
     func preview(identifier: String?, settings: VoiceSettings) {
         stop()
@@ -213,14 +560,19 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
         let id = ObjectIdentifier(utterance)
         Task { @MainActor in
-            guard self.live.contains(id), !self.isSpeaking else { return }
-            self.isSpeaking = true
-            self.onStart?()
+            guard self.live.contains(id) else { return }
+            if let current = self.turn {
+                current.recorder.firstAudio(at: self.uptime)
+                self.markSpeaking(current)
+            } else if !self.isSpeaking {
+                self.isSpeaking = true
+                self.onStart?()
+            }
         }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.onWord?() }
+        Task { @MainActor in self.pulse() }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
@@ -235,9 +587,6 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     private func utteranceEnded(_ id: ObjectIdentifier) {
         guard live.remove(id) != nil else { return }      // ya descartada por stop(): no cuenta
-        if live.isEmpty, isSpeaking {
-            isSpeaking = false
-            onFinish?()
-        }
+        if let current = turn { completeIfDone(current) }
     }
 }

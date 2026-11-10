@@ -2,6 +2,21 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.7.0-fase1] — Motor de voz en tiempo real (el CI compila y prueba la lógica; sin oír en el iPhone)
+
+Reporte real: al responder por voz, el audio se traba. Ver **VOICE_ENGINE.md** (auditoría, decisión sobre ElevenLabs, arquitectura, métricas).
+
+- **Auditoría** (por lectura de código; la causa dominante en el teléfono no se puede determinar sin medir): ElevenLabs por HTTP con una petición por frase y un `AVAudioPlayer` nuevo por frase, pausas artificiales sumadas al silencio del audio, `setCategory`/`setActive` en el hilo principal en cada frase, planificación en el actor principal junto al núcleo 3D, cancelar la generación no cortaba la voz, interrupciones y cambios de audífonos sin observar y ninguna métrica.
+- **Motor nuevo**: texto → `SpeechSegmenter` (unidades naturales; el primer fragmento sale en la primera cláusula) → turno con identificador (`VoiceTurnLedger`: sin duplicados, sin desorden, sin fragmentos tardíos) → **WebSocket de Text-to-Speech de ElevenLabs** con `eleven_flash_v2_5` y audio `pcm_24000` → `RealtimePCMPlayer` (un motor continuo, colchón anti-cortes, cola propia fuera del hilo principal). Empieza a hablar sin esperar al final de la respuesta.
+- **ElevenLabs**: `eleven_v4_turbo` existe pero solo por el WebSocket de **Text-to-Dialogue** (otro protocolo): evaluado, no seleccionado, y nunca se mezclan; un modelo `v3/v4` guardado se sustituye por Flash en este protocolo. «Voz en tiempo real» se puede apagar para volver al envío por frases.
+- **Recuperación**: si la conexión se corta, reconecta una vez retomando solo lo no hablado (alineación del servidor); si no, la voz del sistema termina la respuesta sin repetir ni solaparse; los fallos de configuración (clave, plan, voz, cuota) suspenden la nube con un aviso.
+- **Interrupción**: tocar mientras habla corta al instante (silencio medido) y abre el micrófono; la respuesta cortada no vuelve. Interrumpir *hablando* no está implementado (exige cancelación de eco).
+- **Sistema de audio**: la sesión se configura una vez por turno, no por frase; llamadas, Siri y audífonos desconectados detienen la voz.
+- **Métricas** por turno y pantalla «Rendimiento de la voz» (primer token, primer audio, cortes, descartes, errores, reconexiones, interrupciones; medianas y p95; informe copiable).
+- **CI**: el paso de pruebas del núcleo no tenía `pipefail` (un fallo de `swift test` no habría hecho fallar el trabajo): corregido; los fallos del núcleo y de la app se publican en ramas públicas `ci-errors-*`.
+- ≈ 45 pruebas nuevas en `VoiceEngineTests.swift` (segmentación independiente de los deltas, turnos, colchón, PCM partido a media muestra, métricas con reloj falso, protocolo, simulación de un turno y de una interrupción).
+- **Sin verificar en el dispositivo**: todo lo de audio, red y ElevenLabs (incluidos `pcm_24000` y `auto_mode` con una cuenta gratuita); no hay ninguna cifra de latencia real.
+
 ## [0.6.0] — Viernes 2.0: modificar y borrar eventos, correo con vista previa, dictado mejorado y límite de Groq (el CI lo compila y prueba; sin probar en el iPhone)
 
 Reporte real (iPhone, IPA #5): el calendario crea y consulta bien, pero «elimina la reunión que acabas de crear» respondía que no existe una herramienta para borrar; un correo dictado no se entendía y, al reescribirlo, salió «Alcanzaste el límite del plan gratuito de Groq».

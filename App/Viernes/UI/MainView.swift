@@ -330,7 +330,7 @@ struct MainView: View {
         switch model.coreState {
         case .listening: return "Escuchando · toca para terminar"
         case .thinking: return "Toca para cancelar"
-        case .speaking: return "Toca para interrumpir"
+        case .speaking: return "Toca para interrumpir y hablar"
         default: return "Toca para hablar"
         }
     }

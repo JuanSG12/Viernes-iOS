@@ -94,6 +94,23 @@ struct ElevenLabsVoiceView: View {
                 }
             }
             .listRowBackground(Theme.carbon.opacity(0.5))
+
+            Section {
+                Toggle("Voz en tiempo real", isOn: Binding(get: { cloud.realtimeEnabled }, set: { value in update { $0.realtime = value } }))
+                    .accessibilityIdentifier("eleven-realtime")
+                Text("Viernes empieza a hablar mientras el modelo todavía escribe: el texto va a ElevenLabs por una conexión WebSocket (modelo \(ElevenLabsRealtime.compatibleModelID(cloud.modelID))) y el audio llega por streaming. Si se corta, vuelve a conectar una vez y, si no puede, termina con la voz de Apple sin repetir lo dicho. Apágalo para volver al envío por frases.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                NavigationLink {
+                    VoicePerformanceView(metrics: model.voiceMetrics)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Rendimiento de la voz").foregroundStyle(Theme.textPrimary)
+                        Text("\(model.voiceMetrics.turns.count) respuestas medidas").font(.caption).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .accessibilityIdentifier("voice-performance-link")
+            } header: { Text("Tiempo real") }
+            .listRowBackground(Theme.carbon.opacity(0.5))
         }
         .chromeList()
         .navigationTitle("Voz neuronal")

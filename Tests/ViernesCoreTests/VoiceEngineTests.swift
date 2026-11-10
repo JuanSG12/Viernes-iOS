@@ -138,6 +138,39 @@ final class VoiceTurnLedgerTests: XCTestCase {
     }
 }
 
+extension VoiceTurnLedgerTests {
+    func testAReconnectionContinuesWithOnlyTheTextThatWasPending() {
+        var ledger = VoiceTurnLedger()
+        let turn = ledger.beginTurn()
+        _ = ledger.accept(SpeechSegment(index: 0, text: "Hola, soy Viernes.", pauseAfter: 0), turn: turn)
+        _ = ledger.accept(SpeechSegment(index: 1, text: "Te cuento tu agenda.", pauseAfter: 0), turn: turn)
+        ledger.recordSpoken(characters: 19, turn: turn)
+        let pending = ledger.remainingText()
+        XCTAssertEqual(pending, "Te cuento tu agenda.")
+        ledger.restartSession(carrying: pending)
+        XCTAssertEqual(ledger.sentCharacters, 21)
+        XCTAssertEqual(ledger.spokenCharacters, 0, "La conexión nueva cuenta desde cero")
+        XCTAssertEqual(ledger.remainingText(), "Te cuento tu agenda.")
+        XCTAssertEqual(ledger.accept(SpeechSegment(index: 2, text: "Después, tu jefe.", pauseAfter: 0), turn: turn), .accepted,
+                       "El turno sigue con su numeración: nada se repite")
+        ledger.recordSpoken(characters: 21, turn: turn)
+        XCTAssertEqual(ledger.remainingText(), "Después, tu jefe.")
+        ledger.restartSession(carrying: "   ")
+        XCTAssertEqual(ledger.remainingText(), "")
+    }
+
+    func testTheTrackerClampsAndNeverReportsMoreThanWasSent() {
+        var tracker = SpokenTextTracker()
+        tracker.append("Hola")
+        tracker.spoken(-3)
+        tracker.spoken(2)
+        XCTAssertEqual(tracker.spokenCharacters, 2)
+        XCTAssertEqual(tracker.remainingText(), "", "El corte cae a media palabra y no hay otra después: no se repite «Hola» ni se retoma «la»")
+        tracker.spoken(500)
+        XCTAssertEqual(tracker.spokenCharacters, tracker.sentCharacters, "Nunca más de lo enviado")
+    }
+}
+
 final class JitterBufferAndPCMTests: XCTestCase {
     func testPlaybackStartsWithACushionAndRebuffersLessAfterAnUnderrun() {
         let policy = JitterBufferPolicy()

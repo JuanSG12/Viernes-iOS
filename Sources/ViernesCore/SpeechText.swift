@@ -4,6 +4,11 @@ public struct SpeechChunk: Equatable, Sendable {
     public let text: String
     /// Pausa a insertar DESPUÉS del fragmento (segundos, antes de escalar por el ajuste del usuario).
     public let pauseAfter: TimeInterval
+
+    public init(text: String, pauseAfter: TimeInterval) {
+        self.text = text
+        self.pauseAfter = pauseAfter
+    }
 }
 
 /// Prepara texto de chat para ser hablado: sin markdown, sin emojis, sin URLs largas, por frases.
