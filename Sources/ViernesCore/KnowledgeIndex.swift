@@ -315,12 +315,26 @@ final class KnowledgeIndex {
             let bonus: Double = literalHits.contains(index) ? 100 : 0
             return base + bonus
         }
-        let lexicalRanking = Set(bm25.keys).union(literalHits).sorted { lexicalRank($0) > lexicalRank($1) }
+        // Los empates se resuelven SIEMPRE igual (el orden de un diccionario cambia en cada ejecución de Swift): un empate entre una
+        // coincidencia de texto y una solo semántica favorece a la de texto; después, la más parecida; al final, la posición.
+        let lexicalRanking = Set(bm25.keys).union(literalHits).sorted { a, b in
+            let la = lexicalRank(a), lb = lexicalRank(b)
+            return la != lb ? la > lb : a < b
+        }
         for (rank, index) in lexicalRanking.prefix(60).enumerated() { fused[index, default: 0] += 1 / Double(60 + rank + 1) }
-        let semanticRanking = semantic.filter { $0.value >= 0.2 }.sorted { $0.value > $1.value }.prefix(60)
+        let semanticRanking = semantic.filter { $0.value >= 0.2 }.sorted { a, b in
+            a.value != b.value ? a.value > b.value : a.key < b.key
+        }.prefix(60)
         for (rank, element) in semanticRanking.enumerated() { fused[element.key, default: 0] += 1 / Double(60 + rank + 1) }
 
-        let ranked = fused.sorted { $0.value > $1.value }.prefix(limit)
+        let ranked = fused.sorted { a, b in
+            if a.value != b.value { return a.value > b.value }
+            let la = lexicalRank(a.key), lb = lexicalRank(b.key)
+            if la != lb { return la > lb }
+            let sa = semantic[a.key] ?? 0, sb = semantic[b.key] ?? 0
+            if sa != sb { return sa > sb }
+            return a.key < b.key
+        }.prefix(limit)
         return ranked.compactMap { element -> KnowledgeHit? in
             guard let slot = slots[element.key] else { return nil }
             let coverage = presentTerms == 0 ? 0 : Double(matched[element.key] ?? 0) / Double(presentTerms)
