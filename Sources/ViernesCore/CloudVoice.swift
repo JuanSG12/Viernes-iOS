@@ -7,16 +7,22 @@ public struct ElevenLabsSettings: Codable, Equatable, Sendable {
     public var voiceID: String
     public var voiceName: String
     public var modelID: String
+    /// Voz en tiempo real por WebSocket (audio por streaming mientras el modelo escribe). Opcional para no invalidar ajustes
+    /// guardados antes; `nil` = activada. Si da problemas, se apaga y se vuelve al envío por frases.
+    public var realtime: Bool?
 
     public static let defaultModelID = "eleven_flash_v2_5"
     public static let `default` = ElevenLabsSettings(enabled: false, voiceID: "", voiceName: "", modelID: defaultModelID)
 
-    public init(enabled: Bool, voiceID: String, voiceName: String, modelID: String) {
+    public init(enabled: Bool, voiceID: String, voiceName: String, modelID: String, realtime: Bool? = nil) {
         self.enabled = enabled
         self.voiceID = voiceID
         self.voiceName = voiceName
         self.modelID = modelID
+        self.realtime = realtime
     }
+
+    public var realtimeEnabled: Bool { realtime ?? true }
 
     /// Hay una voz elegida con identificador válido.
     public var hasVoice: Bool { ElevenLabsProtocol.isValidVoiceID(voiceID) }
