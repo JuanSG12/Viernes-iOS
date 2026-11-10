@@ -17,6 +17,17 @@ struct AttachmentSettingsView: View {
                 })
     }
 
+    private var libraryBinding: Binding<Bool> {
+        Binding(get: { model.settings.attachmentSettings.libraryOn },
+                set: { value in
+                    var current = model.settings.attachmentSettings
+                    current.libraryEnabled = value
+                    model.settings.attachments = current
+                })
+    }
+
+    @State private var confirmEraseLibrary = false
+
     private var groqVisionModel: String {
         CapabilityMatrix.visionModel(providerID: CloudProviders.groq.id, chatModel: model.settings.cloudBrain.model,
                                      overrides: model.settings.attachmentSettings.visionModels)
@@ -29,6 +40,16 @@ struct AttachmentSettingsView: View {
                     .accessibilityIdentifier("attachments-ask-toggle")
                 Text("Los documentos se leen en el teléfono. Solo su texto (o las imágenes) sale hacia un proveedor si usas un cerebro en la nube, y por defecto Viernes te lo pregunta antes, diciendo qué sale y adónde. Nunca cambia a otro proveedor sin tu permiso.")
                     .font(.footnote).foregroundStyle(Theme.textSecondary)
+            }
+            .listRowBackground(Theme.carbon.opacity(0.5))
+
+            Section("Biblioteca") {
+                Toggle("Consultar mi biblioteca en las conversaciones", isOn: libraryBinding)
+                    .accessibilityIdentifier("library-enabled-toggle")
+                Text("\(model.libraryItems.count) elementos guardados. Cuando preguntas por tus documentos («mi contrato», «mis notas»…), Viernes busca fragmentos EN EL TELÉFONO y se los da al modelo con su documento y página. Con un cerebro en la nube te pregunta antes de enviarle esos fragmentos (si no desactivaste la pregunta arriba).")
+                    .font(.footnote).foregroundStyle(Theme.textSecondary)
+                Button("Borrar toda la biblioteca", role: .destructive) { confirmEraseLibrary = true }
+                    .disabled(model.libraryItems.isEmpty && model.libraryCollections.isEmpty)
             }
             .listRowBackground(Theme.carbon.opacity(0.5))
 
@@ -70,6 +91,11 @@ struct AttachmentSettingsView: View {
         .chromeList()
         .navigationTitle("Adjuntos y visión")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("¿Borrar toda la biblioteca?", isPresented: $confirmEraseLibrary, titleVisibility: .visible) {
+            Button("Borrar documentos, notas, carpetas e índice", role: .destructive) { model.deleteAllLibrary() }
+        } message: {
+            Text("Se borra todo el texto guardado. Tu memoria personal no se toca. No se puede deshacer.")
+        }
         .onAppear { visionDraft = model.settings.attachmentSettings.visionModels[CloudProviders.groq.id] ?? "" }
     }
 

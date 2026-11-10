@@ -7,13 +7,16 @@ private let failureColor = Color(red: 1.0, green: 0.38, blue: 0.34)
 /// Fila de adjuntos sobre el redactor: cada uno con su estado REAL (leyendo, listo, con aviso o con error) y un botón para quitarlo.
 struct AttachmentStrip: View {
     @ObservedObject var center: AttachmentCenter
+    /// Elementos de la biblioteca (para mostrar si un adjunto guardado ya está indexado).
+    var library: [KnowledgeItem] = []
     var onSelect: (UUID) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(Array(center.drafts.enumerated()), id: \.element.id) { index, draft in
-                    DraftChip(draft: draft, onSelect: { onSelect(draft.id) }, onRemove: { center.remove(draft.id) })
+                    DraftChip(draft: draft, libraryItem: library.first { $0.id == draft.savedItemID },
+                              onSelect: { onSelect(draft.id) }, onRemove: { center.remove(draft.id) })
                         .accessibilityIdentifier("attachment-chip-\(index)")
                 }
             }
@@ -26,6 +29,7 @@ struct AttachmentStrip: View {
 
 private struct DraftChip: View {
     let draft: DraftAttachment
+    let libraryItem: KnowledgeItem?
     let onSelect: () -> Void
     let onRemove: () -> Void
 
@@ -83,6 +87,7 @@ private struct DraftChip: View {
         case .ready:
             HStack(spacing: 4) {
                 if !draft.notes.isEmpty { Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9)).foregroundStyle(Theme.amber) }
+                if draft.savedItemID != nil { Image(systemName: "books.vertical.fill").font(.system(size: 9)).foregroundStyle(Theme.accent) }
                 Text(statusText).font(Theme.mono(9)).foregroundStyle(Theme.textSecondary).lineLimit(1)
             }
         case .failed:
@@ -100,6 +105,10 @@ private struct DraftChip: View {
         case .ready:
             let kind = draft.kind?.displayName ?? "Archivo"
             let size = ByteCountFormatter.string(fromByteCount: Int64(draft.byteCount), countStyle: .file)
+            if draft.savedItemID != nil {
+                let state = libraryItem.map { LibraryStatusBadge.text($0.status) } ?? "guardado"
+                return "\(kind) · en la biblioteca (\(state))"
+            }
             return draft.notes.isEmpty ? "\(kind) · \(size)" : "\(kind) · \(size) · con avisos"
         }
     }
@@ -108,9 +117,15 @@ private struct DraftChip: View {
 /// Detalle de un adjunto: lo que se leyó (distinto de lo que se interpretará), avisos, errores y vista previa del archivo.
 struct AttachmentDetailSheet: View {
     @ObservedObject var center: AttachmentCenter
+    @EnvironmentObject var model: AppModel
     let id: UUID
     @Environment(\.dismiss) private var dismiss
     @State private var quickLookURL: URL?
+    @State private var saveCollection: UUID?
+    @State private var saveTags = ""
+    @State private var saving = false
+    @State private var saveMessage: String?
+    @State private var duplicateOffer = false
 
     private var draft: DraftAttachment? { center.drafts.first { $0.id == id } }
 
@@ -170,8 +185,61 @@ struct AttachmentDetailSheet: View {
                     Button("Abrir vista rápida") { quickLookURL = url }
                         .buttonStyle(ChromeButtonStyle(tint: Theme.accent))
                 }
+                librarySection(draft)
             }
             .padding(20)
+        }
+    }
+
+    /// Guardar el adjunto en la biblioteca de conocimiento (texto extraído, cifrado), para consultarlo en conversaciones futuras.
+    @ViewBuilder private func librarySection(_ draft: DraftAttachment) -> some View {
+        if draft.state == .ready, draft.kind != nil {
+            Theme.label("Biblioteca")
+            if draft.savedItemID != nil {
+                Label("Guardado en la biblioteca", systemImage: "books.vertical.fill")
+                    .font(Theme.body(14)).foregroundStyle(Theme.textPrimary)
+                    .accessibilityIdentifier("attachment-saved")
+            } else {
+                Text(draft.kind == .image
+                     ? "Se guardará el texto reconocido en la imagen (OCR); la imagen en sí no."
+                     : "Se guardará el texto leído, cifrado en tu iPhone; el archivo original no.")
+                    .font(.footnote).foregroundStyle(Theme.textSecondary)
+                Picker("Carpeta", selection: $saveCollection) {
+                    Text("Sin carpeta").tag(UUID?.none)
+                    ForEach(model.libraryCollections) { Text("\($0.kind.displayName): \($0.name)").tag(Optional($0.id)) }
+                }
+                TextField("Etiquetas separadas por comas", text: $saveTags).textInputAutocapitalization(.never)
+                Button(saving ? "Guardando…" : "Guardar en la biblioteca") { save(draft, allowDuplicate: false) }
+                    .disabled(saving)
+                    .buttonStyle(ChromeButtonStyle(tint: Theme.accent))
+                    .accessibilityIdentifier("attachment-save-library")
+                if duplicateOffer {
+                    Button("Guardar de todos modos") { save(draft, allowDuplicate: true) }
+                        .buttonStyle(ChromeButtonStyle(tint: Theme.amber))
+                }
+            }
+            if let message = saveMessage {
+                Text(message).font(.footnote).foregroundStyle(Theme.textPrimary).accessibilityIdentifier("attachment-save-message")
+            }
+        }
+    }
+
+    private func save(_ draft: DraftAttachment, allowDuplicate: Bool) {
+        saving = true
+        duplicateOffer = false
+        Task {
+            let outcome = await model.saveToLibrary(draftID: draft.id, collectionID: saveCollection,
+                                                    tags: saveTags.components(separatedBy: ","), allowDuplicate: allowDuplicate)
+            saving = false
+            switch outcome {
+            case .saved(let item):
+                saveMessage = "Guardado como «\(item.title)». Ya se puede consultar en cualquier conversación."
+            case .duplicate(let existing, let reason):
+                saveMessage = "Ya lo tenías: \(reason.explanation) que «\(existing.title)». No lo guardé otra vez."
+                duplicateOffer = true
+            case .failed(let message):
+                saveMessage = message
+            }
         }
     }
 

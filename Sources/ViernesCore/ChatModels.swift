@@ -61,9 +61,12 @@ public struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     public var engineName: String?
     /// Metadatos de los archivos adjuntos (el contenido no se guarda en el historial).
     public var attachments: [AttachmentRef]?
+    /// Fuentes que se le dieron al modelo para esta respuesta (archivos adjuntos y fragmentos de la biblioteca): «fuentes consultadas».
+    public var sources: [SourceRef]?
 
     public init(id: UUID = UUID(), role: ChatRole, text: String, date: Date = Date(),
-                actions: [ActionRecord] = [], engineName: String? = nil, attachments: [AttachmentRef]? = nil) {
+                actions: [ActionRecord] = [], engineName: String? = nil, attachments: [AttachmentRef]? = nil, sources: [SourceRef]? = nil) {
+        self.sources = sources
         self.attachments = attachments
         self.id = id
         self.role = role

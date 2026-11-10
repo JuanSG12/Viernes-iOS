@@ -94,6 +94,8 @@ public protocol ConfirmationProvider: AnyObject, Sendable {
 public enum ToolCatalog {
     /// Herramientas que el motor de conversación maneja internamente (memoria local).
     public static let memoryToolNames: Set<String> = ["save_memory", "forget_memory", "search_memory"]
+    /// Herramientas de la biblioteca de conocimiento (las maneja el motor de conversación; no hay ejecutor del dispositivo).
+    public static let libraryToolNames: Set<String> = ["search_library"]
     /// Herramientas que actúan sobre algo que ya existe: se localiza el objeto real ANTES de confirmar o ejecutar.
     public static let resolvedTools: Set<String> = ["update_event", "delete_event"]
     /// Herramientas de calendario que necesitan LEER la agenda (existen solo si el usuario activó la lectura en Privacidad).
@@ -234,7 +236,12 @@ public enum ToolCatalog {
             name: "forget_memory",
             summary: "Elimina el recuerdo local que mejor coincida con la consulta.",
             parameters: [ToolParameter("query", "Qué olvidar")],
-            risk: .destructive)
+            risk: .destructive),
+        ToolDefinition(
+            name: "search_library",
+            summary: "Busca en la BIBLIOTECA de documentos del usuario (el texto de sus archivos, notas e imágenes guardados) y devuelve fragmentos con documento y página. Distinta de la memoria personal. Úsala cuando pregunte por sus documentos, contratos, facturas o notas.",
+            parameters: [ToolParameter("query", "Qué buscar en sus documentos, con las palabras o la fecha que el usuario usó")],
+            risk: .safe)
     ]
 
     public static func definition(named name: String) -> ToolDefinition? { all.first { $0.name == name } }

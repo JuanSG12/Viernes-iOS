@@ -21,6 +21,13 @@ private enum QAOverrides {
         default: return .idle
         }
     }
+
+    /// Abre una hoja al arrancar para fotografiarla (`--uitest-open=library` o `=attachment`).
+    static var openSheet: String? {
+        guard active else { return nil }
+        let prefix = "--uitest-open="
+        return ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) }).map { String($0.dropFirst(prefix.count)) }
+    }
 }
 
 struct MainView: View {
@@ -38,7 +45,7 @@ struct MainView: View {
     @State private var detailID: IdentifiedUUID?
 
     enum Sheet: String, Identifiable {
-        case settings, memory, history
+        case settings, memory, history, library
         var id: String { rawValue }
     }
 
@@ -72,6 +79,13 @@ struct MainView: View {
                 .accessibilityIdentifier("banner")
             }
         }
+        .task {
+            // Solo pruebas/capturas: espera a que la semilla real de la biblioteca o de los adjuntos termine y abre la hoja pedida.
+            guard let which = QAOverrides.openSheet else { return }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if which == "library" { sheet = .library }
+            if which == "attachment", let first = model.attachments.drafts.first(where: { $0.failureText == nil }) { detailID = IdentifiedUUID(id: first.id) }
+        }
         .animation(.easeInOut(duration: 0.25), value: model.banner)
         .animation(.easeInOut(duration: 0.3), value: inConversation)
         // Una confirmación no puede presentarse encima de otra hoja: se cierra la que esté abierta.
@@ -83,6 +97,7 @@ struct MainView: View {
                 case .settings: SettingsView()
                 case .memory: MemoryView()
                 case .history: HistoryView(dismissAll: { sheet = nil })
+                case .library: LibraryView()
                 }
             }
             .environmentObject(model)
@@ -121,7 +136,7 @@ struct MainView: View {
             DocumentScannerView(isPresented: $showScanner) { model.attachments.addScan(pages: $0) }.ignoresSafeArea()
         }
         .sheet(item: $detailID) { item in
-            AttachmentDetailSheet(center: model.attachments, id: item.id)
+            AttachmentDetailSheet(center: model.attachments, id: item.id).environmentObject(model)
         }
     }
 
@@ -175,6 +190,8 @@ struct MainView: View {
             .accessibilityIdentifier("attach-menu-more")
         Button { sheet = .memory } label: { Label("Memoria", systemImage: "brain.head.profile") }
             .accessibilityIdentifier("open-memory")
+        Button { sheet = .library } label: { Label("Biblioteca", systemImage: "books.vertical") }
+            .accessibilityIdentifier("open-library")
         Button { sheet = .history } label: { Label("Historial", systemImage: "clock.arrow.circlepath") }
             .accessibilityIdentifier("open-history")
         Button { model.newConversation() } label: { Label("Nueva conversación", systemImage: "square.and.pencil") }
@@ -354,7 +371,7 @@ struct MainView: View {
         VStack(spacing: 8) {
             if let pending = model.pendingTranscript { TranscriptReviewBar(pending: pending) }
             if !model.attachments.drafts.isEmpty {
-                AttachmentStrip(center: model.attachments) { detailID = IdentifiedUUID(id: $0) }
+                AttachmentStrip(center: model.attachments, library: model.libraryItems) { detailID = IdentifiedUUID(id: $0) }
             }
             if keyboardMode { inputBar }
             HStack(spacing: 10) {

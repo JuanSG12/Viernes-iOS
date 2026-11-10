@@ -102,6 +102,12 @@ final class AppModel: ObservableObject {
     let voiceMetrics = VoiceMetricsStore()
     /// Adjuntos del mensaje en preparación (fototeca, cámara, escáner, Archivos) con su estado real de lectura.
     let attachments = AttachmentCenter()
+    /// Biblioteca de conocimiento personal (documentos, imÃ¡genes, notas): almacÃ©n y Ã­ndice APARTE de la memoria.
+    let knowledge: KnowledgeEngine
+    @Published var libraryItems: [KnowledgeItem] = []
+    @Published var libraryCollections: [KnowledgeCollection] = []
+    /// Resultado de la Ãºltima acciÃ³n de la biblioteca (guardado, duplicado, error), para mostrarlo.
+    @Published var libraryNotice: String?
     private let claude = ClaudeCoordinator()
     /// Ejecutor de herramientas del dispositivo (también lo usa la pantalla de Permisos para el diagnóstico del calendario).
     private let tools: DeviceToolExecutor
@@ -132,7 +138,7 @@ final class AppModel: ObservableObject {
     private var bannerTask: Task<Void, Never>?
     private let wakeMatcher = WakeWordMatcher()
 
-    init(container: ModelContainer) {
+    init(container: ModelContainer, knowledgeContainer: ModelContainer) {
         var loaded = settingsStore.load().sanitized()
         if CommandLine.arguments.contains("--uitest") {
             loaded = .default
@@ -144,12 +150,17 @@ final class AppModel: ObservableObject {
         engine = UnavailableEngine(descriptor: initial, reason: "Aún no se ha cargado ningún modelo.")
         memoryStore = SwiftDataMemoryStore(modelContainer: container)
         conversations = ConversationRepository(modelContainer: container)
+        let library = KnowledgeEngine(store: SwiftDataKnowledgeStore(modelContainer: knowledgeContainer), embedder: LibraryEmbedder.make())
+        knowledge = library
         let executor = DeviceToolExecutor(claude: claude, mailDrafts: mailDrafts)
         tools = executor
         conversation = ConversationEngine(engine: engine, memory: memoryStore, executor: executor, confirmer: confirmation,
                                           config: ConversationConfig(memoryPolicy: loaded.memory, claudeMode: loaded.claude.mode,
                                                                      calendarReadEnabled: loaded.calendarReadEnabled,
-                                                                     contactsReadEnabled: loaded.contactsReadEnabled))
+                                                                     contactsReadEnabled: loaded.contactsReadEnabled,
+                                                                     libraryEnabled: loaded.attachmentSettings.libraryOn,
+                                                                     askBeforeCloudLibrary: loaded.attachmentSettings.askBeforeCloud),
+                                          knowledge: library)
         wireServices()
         memoryUnlocked = !loaded.requireBiometricsForMemory      // con Face ID exigido, la memoria arranca BLOQUEADA
     }
@@ -202,6 +213,8 @@ final class AppModel: ObservableObject {
         _ = try? await conversations.prune(retention: settings.transcriptRetention)
         await reloadMemory()
         await reloadHistory()
+        await startLibrary()
+        if CommandLine.arguments.contains("--uitest"), CommandLine.arguments.contains("--uitest-demo-library") { await seedQALibrary() }
         await activateModel(id: settings.selectedModelID ?? recommendedModelID())
         refreshWakeWord()
         // Al final: los comandos de Siri/Atajos encolados en un arranque en frío deben ver el modelo ya activado.
@@ -336,7 +349,8 @@ final class AppModel: ObservableObject {
             // Nube: cada petición cuenta contra los tokens por minuto del plan gratuito (y una orden suele hacer dos peticiones),
             // así que el historial enviado se mantiene moderado.
             historyCharBudget: activeModel.isCloud ? 7_000 : (activeModel.isSystemModel ? 4_500 : 6_000),
-            calendarReadEnabled: settings.calendarReadEnabled, contactsReadEnabled: settings.contactsReadEnabled
+            calendarReadEnabled: settings.calendarReadEnabled, contactsReadEnabled: settings.contactsReadEnabled,
+            libraryEnabled: settings.attachmentSettings.libraryOn, askBeforeCloudLibrary: settings.attachmentSettings.askBeforeCloud
         ))
     }
 
@@ -351,7 +365,8 @@ final class AppModel: ObservableObject {
             voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)
         }
         if settings.memory != old.memory || settings.claude.mode != old.claude.mode || settings.voice.speakResponses != old.voice.speakResponses
-            || settings.calendarReadEnabled != old.calendarReadEnabled || settings.contactsReadEnabled != old.contactsReadEnabled {
+            || settings.calendarReadEnabled != old.calendarReadEnabled || settings.contactsReadEnabled != old.contactsReadEnabled
+            || settings.attachments != old.attachments {
             Task { await pushConversationConfig() }
         }
         if settings.transcriptRetention != old.transcriptRetention {
@@ -944,6 +959,7 @@ final class AppModel: ObservableObject {
 
     func resume(_ snapshot: ConversationSnapshot) {
         stopEverything()
+        attachments.purgeAll()           // el contenido de los archivos no se guarda en el historial
         messages = snapshot.messages
         currentConversationID = snapshot.id
         conversationStartedAt = snapshot.startedAt
@@ -1038,14 +1054,17 @@ final class AppModel: ObservableObject {
         Task {
             try? await memoryStore.deleteAll()
             try? await conversations.deleteAll()
+            try? await knowledge.deleteAll()
             try? Vault().destroyKey()
             recognition.clear()
             tools.clearLedger()
             CloudKeyStore.deleteAll()
             settingsStore.reset()
+            attachments.purgeAll()
             messages = []
             settings = .default
             await conversation.resetConversation()
+            await reloadLibrary()
             await reloadMemory()
             await reloadHistory()
             showBanner("Todos los datos locales de Viernes fueron eliminados.")

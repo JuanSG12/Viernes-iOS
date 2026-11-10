@@ -2,6 +2,36 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [0.7.0-fase3] — Knowledge Engine: biblioteca de conocimiento personal (el CI compila y prueba; sin probar en el iPhone)
+
+Detalle, pipeline, búsqueda y límites en **KNOWLEDGE_ENGINE.md**.
+
+- **Biblioteca** de documentos, imágenes con texto, notas y textos, con proyectos/carpetas/colecciones anidables, etiquetas, fechas, identificador estable, metadatos y **estado de procesamiento real** (procesando → indexado | error). Guarda el texto extraído con su página/sección/líneas, no el archivo original.
+- **Pipeline**: validar → límites → hash SHA-256 (archivo y texto) → duplicados (mismo archivo, mismo texto en otro formato, casi idéntico) → fragmentar con referencias → vectores → guardar cifrado → indexar → **verificar que se recupera**. Una interrupción nunca deja un elemento «indexado» a medias.
+- **Búsqueda híbrida** sin base de datos externa: BM25 con raíces y sin acentos + significado por coseno (modelo de frases del sistema en español si existe; si no, un modelo básico propio, portable y sin descargas, que **no entiende sinónimos**) + fechas literales («15 de marzo de 2023» se busca como `2023-03-15`, `15/03/2023`…); filtros por documento, proyecto, etiqueta, tipo y fecha.
+- **Memoria y biblioteca separadas**: almacén aparte (`knowledge.store`), índice, pantalla y borrado propios; ambos cifrados con la clave del Llavero. «Borrar todos los datos» también vacía la biblioteca.
+- **Respuestas fundamentadas**: si preguntas por tus documentos («mi contrato», «mis notas»…) o hay coincidencias claras, Viernes busca fragmentos en el teléfono y los entrega al modelo con documento y página; cita, distingue texto de interpretación y, si no hay evidencia o la biblioteca está vacía, se lo dice al modelo para que no invente. Herramienta `search_library` para búsquedas explícitas. Cada respuesta muestra **«Fuentes consultadas»**.
+- **Privacidad y seguridad**: con un cerebro en la nube se pide permiso antes de enviarle fragmentos (ajustable); lo que devuelve la biblioteca es contenido no confiable (neutralizado, y con él en juego cualquier acción exige confirmación).
+- **Interfaz**: Más › Biblioteca (lista con estados, buscador, filtro, detalle, notas, carpetas), «Guardar en la biblioteca» desde el detalle de un adjunto, ajustes de la biblioteca.
+- Pruebas: ≈ 45 en el núcleo, 9 en la app (SwiftData cifrado, separación memoria/biblioteca, OCR, borrado) y 2 de interfaz.
+- **Sin verificar en el dispositivo**: rendimiento con una biblioteca grande, calidad de la búsqueda por significado con el modelo del sistema, uso real con Groq/Gemini. Pendiente: índice persistente cifrado si se superan los límites, editar notas, exportar.
+
+## [0.7.0-fase2] — Multimodalidad: adjuntos, imágenes, documentos y escáner (el CI compila y prueba; sin probar en el iPhone)
+
+Detalle técnico, formatos, matriz de capacidades y límites en **MULTIMODAL_ARCHITECTURE.md**.
+
+- **Adjuntos** desde la fototeca, la cámara, el escáner de documentos (VisionKit) y Archivos, con vista de estado real por adjunto (*leyendo / listo / con avisos / no se pudo leer*), detalle, vista previa y quitar. Menú «Adjuntar» y botón de clip.
+- **Imágenes** JPG/PNG/HEIC/WebP: orientación EXIF, transparencia → blanco, reducción a ≤ 1 568 px y JPEG ≤ 2,9 MB; OCR local (Vision) como alternativa que no saca nada del teléfono.
+- **Documentos** con lector propio por tipo: PDF (PDFKit + OCR para páginas escaneadas, con número de página), DOCX y XLSX (lector ZIP/DEFLATE propio en Swift puro, sin dependencias), CSV, JSON, XML, Markdown, TXT y código (con rangos de líneas). Sin lector real ⇒ se rechaza con el motivo (`.doc`, `.xls`, `.pptx`…).
+- **Validación por contenido** (no por extensión), límites de tamaño/páginas/celdas, protección contra bombas de compresión y contra archivos con contraseña o dañados; mensajes en español con alternativa.
+- **Matriz de capacidades** por cerebro (texto, imagen, PDF, audio, contexto, herramientas, streaming) con sus fuentes, visible en Ajustes › Adjuntos y visión; modelo de visión de Groq editable y comprobable.
+- **Enrutador**: decide qué cerebro puede leer lo adjuntado; pide permiso antes de enviar nada a la nube (ajustable); nunca cambia a otro proveedor sin autorización; el cambio dura un mensaje y conserva el contexto; la respuesta dice qué cerebro contestó.
+- **Selección de fragmentos** por relevancia (BM25) o repartidos (peticiones generales), con referencia de archivo + página/sección/líneas; **comparación** de documentos y hojas calculada en el teléfono.
+- **Seguridad**: el contenido de archivos es información no confiable (bloque marcado, etiquetas internas y caracteres invisibles neutralizados, reglas de sistema) y, mientras haya contenido de archivos, **toda acción que no sea una consulta exige confirmación**; detector heurístico de frases que dan órdenes (solo avisa).
+- El historial guarda solo metadatos de los adjuntos; los archivos temporales se borran al quitarlos, al iniciar una conversación nueva y al arrancar.
+- Pruebas: ≈ 100 en el núcleo (archivos reales: DOCX/XLSX con DEFLATE de .NET, ZIP con bomba, etc.), 20 en la app (imágenes, PDF con texto, OCR, PDF con contraseña, centro de adjuntos) y 2 de interfaz.
+- **Sin verificar en el dispositivo**: cámara, escáner VisionKit, envío real a Groq/Gemini (se prueba la forma de la petición, no la respuesta del proveedor). Pendiente para la fase 3: biblioteca persistente, índice, búsqueda y respuestas con fuentes guardadas.
+
 ## [0.7.0-fase1] — Motor de voz en tiempo real (el CI compila y prueba la lógica; sin oír en el iPhone)
 
 Reporte real: al responder por voz, el audio se traba. Ver **VOICE_ENGINE.md** (auditoría, decisión sobre ElevenLabs, arquitectura, métricas).

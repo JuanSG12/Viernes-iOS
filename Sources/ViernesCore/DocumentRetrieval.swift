@@ -65,6 +65,8 @@ public struct Excerpt: Equatable, Sendable {
     public let documentName: String
     public let reference: String
     public let text: String
+    /// De dónde sale: un archivo adjunto a este mensaje o la biblioteca personal.
+    public var origin: SourceRef.Origin = .attachment
 }
 
 public struct ExcerptSelection: Equatable, Sendable {
@@ -94,7 +96,7 @@ public enum ExcerptSelector {
         "pagina", "columna", "fila", "texto", "docx", "xlsx", "csv", "escaneo", "escaner"
     ]
 
-    private static func contentTokens(_ query: String) -> [String] {
+    static func contentTokens(_ query: String) -> [String] {
         TextNormalizer.tokens(query).filter { !genericWords.contains($0) }.map(TextNormalizer.stem)
     }
 

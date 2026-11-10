@@ -230,6 +230,68 @@ final class ViernesUITests: XCTestCase {
         XCTAssertFalse(chip(app, "falso.pdf").waitForExistence(timeout: 2), "Quitado")
     }
 
+    // MARK: Biblioteca
+
+    private func openLibrary(_ app: XCUIApplication) {
+        let more = app.buttons["quick-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "Falta el menú Más")
+        more.tap()
+        let item = menuItem(app, id: "open-library", label: "Biblioteca")
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "El menú Más no ofrece la Biblioteca")
+        item.tap()
+    }
+
+    func testEmptyLibraryExplainsItselfAndOffersEveryWayToAdd() {
+        let app = launch()
+        openLibrary(app)
+        XCTAssertTrue(field(app, "library-empty").waitForExistence(timeout: 5), "La biblioteca vacía dice qué es y cómo llenarla")
+        let add = app.buttons["library-add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        add.tap()
+        XCTAssertTrue(menuItem(app, id: "library-add-file", label: "Añadir archivo…").waitForExistence(timeout: 5))
+        XCTAssertTrue(menuItem(app, id: "library-add-note", label: "Nueva nota").exists)
+        XCTAssertTrue(menuItem(app, id: "library-collections", label: "Proyectos y carpetas").exists)
+    }
+
+    func testLibraryShowsRealIndexedItemsSearchesByContentAndDeletes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitest", "--uitest-skip-onboarding", "--uitest-demo-library"]
+        app.launchEnvironment["VIERNES_KEYCHAIN_SERVICE"] = "com.example.viernes.uitests"
+        app.launch()
+        openLibrary(app)
+
+        // Los tres elementos pasaron por el pipeline real y quedaron indexados.
+        let contract = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "contrato, indexado")).firstMatch
+        XCTAssertTrue(contract.waitForExistence(timeout: 20), "El contrato debe aparecer indexado")
+        XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "ventas, indexado")).firstMatch.exists)
+        XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Ideas del proyecto, indexado")).firstMatch.exists)
+
+        // Búsqueda por contenido: «salario» solo está dentro del contrato.
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("salario")
+        let hit = app.buttons["library-hit"].firstMatch
+        XCTAssertTrue(hit.waitForExistence(timeout: 10), "La búsqueda por contenido debe devolver el fragmento")
+        XCTAssertTrue(hit.label.contains("contrato"), "El resultado dice de qué documento sale: «\(hit.label)»")
+        hit.tap()
+
+        // Detalle: título editable y borrado con confirmación.
+        let title = app.textFields["library-item-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.value as? String, "contrato")
+        let delete = app.buttons["library-item-delete"]
+        if !delete.exists { app.swipeUp() }
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+        let confirm = app.buttons["Eliminar"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Borrar pide confirmación")
+        confirm.tap()
+
+        // Ya no aparece al buscar lo mismo.
+        XCTAssertFalse(app.buttons["library-hit"].firstMatch.waitForExistence(timeout: 4), "Lo borrado deja de aparecer en las búsquedas")
+    }
+
     func testPermissionsScreenListsEachPermissionWithItsReason() {
         let app = launch()
         app.buttons["open-settings"].tap()

@@ -62,10 +62,14 @@ public struct AttachmentSettings: Codable, Equatable, Sendable {
     public var askBeforeCloud: Bool
     /// Modelo de visión elegido por proveedor (si falta, se usa el de la tabla de `CapabilityMatrix`).
     public var visionModels: [String: String]
+    /// Consultar la biblioteca de conocimiento en las conversaciones (opcional por compatibilidad; activada por defecto).
+    public var libraryEnabled: Bool?
+    public var libraryOn: Bool { libraryEnabled ?? true }
 
     public static let `default` = AttachmentSettings(askBeforeCloud: true, visionModels: [:])
 
-    public init(askBeforeCloud: Bool = true, visionModels: [String: String] = [:]) {
+    public init(askBeforeCloud: Bool = true, visionModels: [String: String] = [:], libraryEnabled: Bool? = nil) {
+        self.libraryEnabled = libraryEnabled
         self.askBeforeCloud = askBeforeCloud
         self.visionModels = visionModels
     }

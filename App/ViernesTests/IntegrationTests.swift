@@ -165,7 +165,7 @@ final class IntegrationTests: XCTestCase {
     // MARK: Modelo de aplicación
 
     private func makeModel() throws -> AppModel {
-        AppModel(container: try ViernesStore.makeContainer(inMemory: true))
+        AppModel(container: try ViernesStore.makeContainer(inMemory: true), knowledgeContainer: try ViernesStore.makeKnowledgeContainer(inMemory: true))
     }
 
     func testFreshModelStartsDisconnectedWithPrivateDefaults() throws {

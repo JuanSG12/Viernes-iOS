@@ -81,6 +81,8 @@ jobs:
           shoot home-fallback-2d --uitest-core-state=idle
           shoot conversation-weather --uitest-3d --uitest-demo-weather
           shoot attachments-real-states --uitest-demo-attachments --uitest-core-state=idle
+          shoot library-real-states --uitest-demo-library --uitest-open=library
+          shoot attachment-detail-real --uitest-demo-attachments --uitest-open=attachment
           ls -la shots
 
       - uses: actions/upload-artifact@v4

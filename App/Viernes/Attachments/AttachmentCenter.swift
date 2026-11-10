@@ -24,6 +24,8 @@ struct DraftAttachment: Identifiable {
     /// Dato informativo (p. ej. «Imagen reducida a 1568×1176 px»), distinto de un aviso.
     var info: String?
     var notes: [String] = []
+    /// Si ya se guardó en la biblioteca: el elemento (su estado de indexado lo muestra la biblioteca).
+    var savedItemID: UUID?
 
     var ref: AttachmentRef? {
         guard let kind = kind, state == .ready else { return nil }
@@ -139,6 +141,11 @@ final class AttachmentCenter: ObservableObject {
     func remove(_ id: UUID) {
         if let draft = drafts.first(where: { $0.id == id }) { AttachmentFiles.delete(draft.previewURL) }
         drafts.removeAll { $0.id == id }
+    }
+
+    func markSaved(_ id: UUID, itemID: UUID) {
+        guard let index = drafts.firstIndex(where: { $0.id == id }) else { return }
+        drafts[index].savedItemID = itemID
     }
 
     /// Pasa los adjuntos listos a «enviados» (conserva sus archivos para la vista previa) y vacía el redactor.

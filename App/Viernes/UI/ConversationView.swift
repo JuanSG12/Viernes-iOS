@@ -167,6 +167,7 @@ struct AssistantMessage: View {
                     .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
                 ForEach(message.actions.filter { $0.isVisible }) { ActionCard(record: $0) }
+                if let sources = message.sources, !sources.isEmpty { SourcesRow(sources: sources) }
                 if isLast && !isSystemNotice { actionRow }
             }
         }
@@ -189,6 +190,29 @@ struct AssistantMessage: View {
                 .buttonStyle(ChromeIconButtonStyle(size: 32))
                 .accessibilityLabel("Copiar respuesta")
                 .accessibilityIdentifier("copy-message")
+        }
+        .padding(.top, 2)
+    }
+}
+
+/// «Fuentes consultadas»: lo que se le dio al modelo para responder (archivos adjuntos y fragmentos de la biblioteca), con página o sección.
+/// Son las fuentes ENTREGADAS al modelo, no una garantía de qué usó: la respuesta debe citarlas y distinguir texto de interpretación.
+struct SourcesRow: View {
+    let sources: [SourceRef]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("FUENTES CONSULTADAS").font(Theme.mono(9)).tracking(1.6).foregroundStyle(Theme.textSecondary.opacity(0.8))
+            ForEach(sources) { source in
+                HStack(spacing: 6) {
+                    Image(systemName: source.origin == .library ? "books.vertical" : "paperclip")
+                        .font(.system(size: 10)).foregroundStyle(Theme.silver)
+                    Text(source.label).font(Theme.mono(11)).foregroundStyle(Theme.textPrimary).lineLimit(2)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Fuente: \(source.label)")
+                .accessibilityIdentifier("source-chip")
+            }
         }
         .padding(.top, 2)
     }

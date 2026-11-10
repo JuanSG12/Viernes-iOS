@@ -154,7 +154,7 @@ Write-Host "`n[5] Herramientas: catálogo ↔ ejecutor ↔ validador"
 $checks++
 $toolsFile = [System.IO.File]::ReadAllText((P 'Sources/ViernesCore/Tools.swift'))
 $toolNames = [regex]::Matches($toolsFile, 'ToolDefinition\(\s*name:\s*"([a-z_]+)"') | ForEach-Object { $_.Groups[1].Value }
-$memoryTools = @('save_memory', 'forget_memory', 'search_memory')
+$memoryTools = @('save_memory', 'forget_memory', 'search_memory', 'search_library')
 $executor = [System.IO.File]::ReadAllText((P 'App/Viernes/Tools/DeviceToolExecutor.swift'))
 $engine = [System.IO.File]::ReadAllText((P 'Sources/ViernesCore/ConversationEngine.swift'))
 $validator = [System.IO.File]::ReadAllText((P 'Sources/ViernesCore/ToolValidator.swift'))
