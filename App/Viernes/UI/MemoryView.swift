@@ -16,6 +16,22 @@ struct MemoryView: View {
         return model.memoryItems.filter { ids.contains($0.id) || TextNormalizer.fold($0.text).contains(TextNormalizer.fold(query)) }
     }
 
+    /// Línea de detalle de un recuerdo (en pasos simples: una sola expresión larga no la compila Swift a tiempo).
+    private static func detailLine(for item: MemoryItem) -> String {
+        var line: String = item.kind.displayName
+        line += " · "
+        line += item.updatedAt.formatted(date: .abbreviated, time: .omitted)
+        if let relations: String = MemoryRelations.summary(of: item) {
+            line += " · "
+            line += relations
+        }
+        if let expires: Date = item.expiresAt {
+            line += " · caduca "
+            line += expires.formatted(date: .abbreviated, time: .omitted)
+        }
+        return line
+    }
+
     var body: some View {
         Group {
             if model.settings.requireBiometricsForMemory && !model.memoryUnlocked {
@@ -104,9 +120,7 @@ struct MemoryView: View {
                                 if item.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(Theme.accent) }
                                 Text(item.text).foregroundStyle(Theme.textPrimary).multilineTextAlignment(.leading)
                             }
-                            Text("\(item.kind.displayName) · \(item.updatedAt.formatted(date: .abbreviated, time: .omitted))"
-                                 + (MemoryRelations.summary(of: item).map { " · " + $0 } ?? "")
-                                 + (item.expiresAt.map { " · caduca \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""))
+                            Text(Self.detailLine(for: item))
                                 .font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                     }
