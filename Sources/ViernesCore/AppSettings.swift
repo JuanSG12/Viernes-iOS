@@ -66,6 +66,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var attachments: AttachmentSettings?
     /// Perfil: identidad de la asistente, personalidad, idioma, región, autonomía y herramientas apagadas. Opcional por la misma razón que `cloud`.
     public var profile: ProfileSettings?
+    /// Consumo: presupuesto mensual, proveedores autorizados/de pago y tarifas. Opcional por la misma razón que `cloud`.
+    public var usage: UsageSettings?
 
     public var calendarReadEnabled: Bool { calendarRead ?? false }
     public var contactsReadEnabled: Bool { contactsRead ?? false }
@@ -109,6 +111,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         copy.speech = speech?.sanitized()
         copy.attachments = attachments?.sanitized()
         copy.profile = profile?.sanitized()
+        copy.usage = usage?.sanitized()
         if claude.shortcutName.trimmingCharacters(in: .whitespaces).isEmpty { copy.claude.shortcutName = ClaudeBridgeConfig().shortcutName }
         return copy
     }

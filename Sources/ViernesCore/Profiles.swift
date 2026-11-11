@@ -512,6 +512,8 @@ public struct ProfileStorageLayout: Equatable, Sendable {
     public var memoryStorePath: String { dataDirectory + "/viernes.store" }
     public var knowledgeStorePath: String { dataDirectory + "/knowledge.store" }
     public var recognitionHistoryPath: String { isLegacy ? "recognition-history.bin" : dataDirectory + "/recognition-history.bin" }
+    /// Historial de consumo de los proveedores en la nube (cifrado, solo de este perfil).
+    public var usageHistoryPath: String { isLegacy ? "usage-history.bin" : dataDirectory + "/usage-history.bin" }
 
     /// Todos los nombres de Llavero y UserDefaults de este perfil (para borrarlos o comprobar que no chocan con los de otro).
     public func secretAccounts(providerIDs: [String]) -> [String] {

@@ -27,6 +27,9 @@ struct SettingsView: View {
                 }.accessibilityIdentifier("settings-cloud")
                 row(icon: model.isOnline ? "wifi" : "wifi.slash", title: "Conexión",
                     detail: model.isOnline ? "En línea. El modelo local funciona igual sin internet." : "Sin conexión. Todo sigue funcionando en modo local.", status: nil)
+                NavigationLink { UsageView() } label: {
+                    row(icon: "chart.bar", title: "Consumo y presupuesto", detail: "Tokens, costo estimado, límite mensual, proveedores autorizados", status: nil)
+                }.accessibilityIdentifier("settings-usage")
                 NavigationLink { ClaudeSettingsView() } label: {
                     row(icon: "arrow.up.forward.app", title: "Claude", detail: model.settings.claude.mode.displayName, status: nil)
                 }.accessibilityIdentifier("settings-claude")

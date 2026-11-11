@@ -96,7 +96,7 @@ final class ProfileStorageLayoutTests: XCTestCase {
         let providers = CloudProviders.all.map(\.id) + [ElevenLabsProtocol.keyProviderID]
         func names(_ layout: ProfileStorageLayout) -> [String] {
             [layout.settingsKey, layout.createdEventsKey, layout.vaultKeyAccount, layout.memoryStorePath, layout.knowledgeStorePath,
-             layout.recognitionHistoryPath] + providers.map { layout.apiKeyAccount(providerID: $0) }
+             layout.recognitionHistoryPath, layout.usageHistoryPath] + providers.map { layout.apiKeyAccount(providerID: $0) }
         }
         var seen = Set<String>()
         for entry in registry.entries {
@@ -104,7 +104,7 @@ final class ProfileStorageLayoutTests: XCTestCase {
                 XCTAssertTrue(seen.insert(name).inserted, "Dos perfiles comparten el nombre \(name)")
             }
         }
-        XCTAssertEqual(seen.count, registry.entries.count * (6 + providers.count))
+        XCTAssertEqual(seen.count, registry.entries.count * (7 + providers.count))
     }
 
     func testPathsStayInsideTheAppFolderAndNeverEscape() {

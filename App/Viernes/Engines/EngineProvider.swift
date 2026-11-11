@@ -15,10 +15,10 @@ enum EngineProvider {
         return false
     }
 
-    static func makeEngine(for descriptor: ModelDescriptor, cloud: CloudBrainSettings = .default) -> LanguageModelEngine? {
+    static func makeEngine(for descriptor: ModelDescriptor, cloud: CloudBrainSettings = .default, usage: UsageHooks? = nil) -> LanguageModelEngine? {
         switch descriptor.backend {
         case .cloud:
-            return CloudEngine(descriptor: descriptor, settings: cloud)
+            return CloudEngine(descriptor: descriptor, settings: cloud, usage: usage)
         case .appleFoundation:
             #if canImport(FoundationModels)
             if #available(iOS 26.0, *) { return FoundationModelsEngine() }

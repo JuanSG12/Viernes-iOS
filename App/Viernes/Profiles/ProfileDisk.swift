@@ -34,6 +34,7 @@ struct ProfileDisk {
             for suffix in ["", "-shm", "-wal"] { urls.append(url(path + suffix)) }
         }
         urls.append(url(layout.recognitionHistoryPath))
+        urls.append(url(layout.usageHistoryPath))
         return urls
     }
 

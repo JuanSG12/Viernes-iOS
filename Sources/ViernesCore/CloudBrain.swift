@@ -10,8 +10,12 @@ public struct CloudProviderPreset: Identifiable, Equatable, Sendable {
     public let defaultModel: String
     public let keyPageURL: String
     public let note: String
+    /// El proveedor documenta `stream_options.include_usage`: se le pide el consumo real al final del flujo. En los demás se lee
+    /// el consumo si lo informan y, si no, se estima por el texto (marcado como estimación). No se envían parámetros no documentados.
+    public let streamUsage: Bool
 
-    public init(id: String, displayName: String, baseURL: String, defaultModel: String, keyPageURL: String, note: String) {
+    public init(id: String, displayName: String, baseURL: String, defaultModel: String, keyPageURL: String, note: String, streamUsage: Bool = false) {
+        self.streamUsage = streamUsage
         self.id = id
         self.displayName = displayName
         self.baseURL = baseURL
@@ -37,7 +41,23 @@ public enum CloudProviders {
         note: "Clave desde Google AI Studio. Los modelos y límites del plan gratuito cambian con frecuencia: usa «Probar conexión» para ver los disponibles."
     )
 
-    public static let all: [CloudProviderPreset] = [groq, gemini]
+    public static let openAI = CloudProviderPreset(
+        id: "openai", displayName: "OpenAI",
+        baseURL: "https://api.openai.com/v1",
+        defaultModel: "gpt-4o-mini",
+        keyPageURL: "https://platform.openai.com/api-keys",
+        note: "La API de OpenAI se paga por uso: configura un presupuesto mensual y las tarifas en Ajustes › Consumo y presupuesto. Los modelos cambian: usa «Probar conexión» para ver los disponibles en tu cuenta.",
+        streamUsage: true
+    )
+    public static let cerebras = CloudProviderPreset(
+        id: "cerebras", displayName: "Cerebras",
+        baseURL: "https://api.cerebras.ai/v1",
+        defaultModel: "gpt-oss-120b",
+        keyPageURL: "https://cloud.cerebras.ai/",
+        note: "Inferencia muy rápida con API compatible con OpenAI. Los modelos y límites cambian: usa «Probar conexión» para ver los disponibles en tu cuenta."
+    )
+
+    public static let all: [CloudProviderPreset] = [groq, gemini, openAI, cerebras]
 
     public static func preset(id: String) -> CloudProviderPreset { all.first { $0.id == id } ?? groq }
 }
@@ -89,7 +109,8 @@ public enum OpenAIChatProtocol {
         return URL(string: preset.baseURL + "/" + path)
     }
 
-    public static func requestBody(model: String, system: String, turns: [ChatTurn], maxTokens: Int, temperature: Double) throws -> Data {
+    public static func requestBody(model: String, system: String, turns: [ChatTurn], maxTokens: Int, temperature: Double,
+                                   includeUsage: Bool = false) throws -> Data {
         var messages: [[String: Any]] = [["role": "system", "content": system]]
         for turn in turns {
             let role = turn.role == .user ? "user" : "assistant"
@@ -112,7 +133,24 @@ public enum OpenAIChatProtocol {
             "temperature": temperature
         ]
         if usesHiddenReasoning(model: model) { body["reasoning_effort"] = "low" }
+        if includeUsage { body["stream_options"] = ["include_usage": true] }
         return try JSONSerialization.data(withJSONObject: body)
+    }
+
+    /// Consumo de tokens que el proveedor informó en una línea del flujo: `usage` (formato OpenAI) o `x_groq.usage` (Groq).
+    public static func parseUsage(_ line: String) -> TokenUsage? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("data:") else { return nil }
+        let payload = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        guard payload != "[DONE]", let data = payload.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let candidates: [[String: Any]?] = [object["usage"] as? [String: Any], (object["x_groq"] as? [String: Any])?["usage"] as? [String: Any]]
+        for case let usage? in candidates {
+            let input = (usage["prompt_tokens"] as? Int) ?? (usage["input_tokens"] as? Int)
+            let output = (usage["completion_tokens"] as? Int) ?? (usage["output_tokens"] as? Int)
+            if input != nil || output != nil { return TokenUsage(input: input ?? 0, output: output ?? 0) }
+        }
+        return nil
     }
 
     /// Modelos que «piensan» antes de contestar (p. ej. gpt-oss). Ese razonamiento gasta `max_tokens` y puede dejar la

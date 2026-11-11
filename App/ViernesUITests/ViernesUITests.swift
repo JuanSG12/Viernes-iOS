@@ -351,6 +351,20 @@ final class ViernesUITests: XCTestCase {
         XCTAssertTrue(contractRow(app).waitForExistence(timeout: 20), "Al volver, el perfil principal conserva su biblioteca")
     }
 
+    func testUsageScreenAppliesTheMonthlyBudget() {
+        let app = launch()
+        openSettingsRow(app, "settings-usage")
+        let status = field(app, "usage-status")
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertTrue(status.label.contains("Sin presupuesto"), "Por defecto no hay límite: «\(status.label)»")
+        let ten = app.buttons["usage-budget-10"]
+        reveal(ten, in: app)
+        ten.tap()
+        let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "US$ 10"), object: status)
+        XCTAssertEqual(XCTWaiter().wait(for: [updated], timeout: 10), .completed, "El estado refleja el presupuesto elegido: «\(status.label)»")
+        XCTAssertTrue(status.label.contains("Gastado"), status.label)
+    }
+
     func testPersonalityShowsExactlyWhatIsAddedToTheModel() {
         let app = launch()
         openSettingsRow(app, "settings-personality")

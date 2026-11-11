@@ -102,6 +102,8 @@ final class AppModel: ObservableObject {
     let profileLayout: ProfileStorageLayout
     /// Historial local de reconocimiento de voz, para diagnóstico.
     let recognition: RecognitionHistory
+    /// Consumo de los proveedores en la nube de este perfil: historial cifrado, presupuesto y límites informados.
+    let usage: UsageStore
     /// Métricas de los últimos turnos de voz (informe de rendimiento).
     let voiceMetrics = VoiceMetricsStore()
     /// Adjuntos del mensaje en preparación (fototeca, cámara, escáner, Archivos) con su estado real de lectura.
@@ -172,6 +174,9 @@ final class AppModel: ObservableObject {
         libraryStore.use(vault: vault)
         knowledgeStore = libraryStore
         recognition = RecognitionHistory(vault: vault, fileName: layout.recognitionHistoryPath)
+        let usageStore = UsageStore(vault: vault, path: layout.usageHistoryPath)
+        usageStore.settings = loaded.usageSettings
+        usage = usageStore
         let library = KnowledgeEngine(store: libraryStore, embedder: LibraryEmbedder.make())
         knowledge = library
         let executor = DeviceToolExecutor(claude: claude, mailDrafts: mailDrafts, ledger: EventLedger(defaults: defaults, key: layout.createdEventsKey))
@@ -284,7 +289,7 @@ final class AppModel: ObservableObject {
         activeModel = descriptor
         if settings.selectedModelID != descriptor.id { settings.selectedModelID = descriptor.id }
 
-        if let real = EngineProvider.makeEngine(for: descriptor, cloud: settings.cloudBrain) {
+        if let real = EngineProvider.makeEngine(for: descriptor, cloud: settings.cloudBrain, usage: usageHooks) {
             engine = real
             // Si el proveedor pide esperar (límite del plan gratuito), la pantalla lo dice en vez de parecer colgada.
             if let reporting = real as? EngineStatusReporting {
@@ -389,6 +394,7 @@ final class AppModel: ObservableObject {
         if settings.voice != old.voice { speaker.apply(settings.voice) }
         if settings.claude != old.claude { claude.config = settings.claude }
         if settings.contactsRead != old.contactsRead { tools.contactsReadSetting = settings.contactsRead }
+        if settings.usage != old.usage { usage.settings = settings.usageSettings }
         if settings.profile != old.profile { tools.defaultRegion = settings.profileSettings.region }
         if settings.cloudBrain != old.cloudBrain { refreshCloudEngine() }
         if settings.recognitionLocale != old.recognitionLocale {
@@ -867,7 +873,7 @@ final class AppModel: ObservableObject {
         let descriptor = ModelDescriptor(id: brain.id, displayName: brain.displayName, backend: .cloud, approxDownloadMB: 0, minDeviceRAMGB: 0,
                                          license: "Términos del proveedor elegido", spanishQuality: 5,
                                          notes: "Cerebro en la nube usado solo para este mensaje.")
-        let engine = CloudEngine(descriptor: descriptor, settings: CloudBrainSettings(providerID: provider, model: model))
+        let engine = CloudEngine(descriptor: descriptor, settings: CloudBrainSettings(providerID: provider, model: model), usage: usageHooks)
         engine.onStatus = { [weak self] text in Task { @MainActor in self?.engineWaitNote = text } }
         return engine
     }
@@ -1089,6 +1095,7 @@ final class AppModel: ObservableObject {
             try? Vault(layout: profileLayout).destroyKey()
             recognition.clear()
             tools.clearLedger()
+            usage.clear()
             CloudKeyStore.deleteAll()
             settingsStore.reset()
             attachments.purgeAll()
@@ -1170,6 +1177,25 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: Utilidades
+
+    /// Lo que los motores en la nube necesitan del consumo de este perfil (ver `UsageHooks`).
+    private var usageHooks: UsageHooks {
+        let store = usage
+        return UsageHooks(
+            gate: { provider, model in store.gate(providerID: provider, model: model) },
+            record: { provider, model, tokens in store.record(providerID: provider, model: model, usage: tokens) },
+            limits: { provider, snapshot in store.setLimits(provider, snapshot) },
+            warn: { [weak self] text in Task { @MainActor in self?.showUsageWarning(text) } })
+    }
+
+    private var lastUsageWarning = ""
+
+    /// El aviso de consumo se muestra una vez por mensaje distinto, no en cada petición.
+    private func showUsageWarning(_ text: String) {
+        guard text != lastUsageWarning else { return }
+        lastUsageWarning = text
+        showBanner(text)
+    }
 
     func showBanner(_ text: String) {
         banner = text

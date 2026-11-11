@@ -3,15 +3,26 @@ import ViernesCore
 
 /// Cerebro en la nube: API de chat compatible con OpenAI (Groq, Gemini…) con la clave gratuita del usuario.
 /// ⚠️ El texto de la conversación sale del iPhone hacia el proveedor. Por eso es opt-in y se explica en su pantalla.
+/// Lo que el motor en la nube necesita del consumo del perfil: permiso previo (autorización y presupuesto), anotar lo gastado y lo que
+/// informó el proveedor sobre sus límites.
+struct UsageHooks: @unchecked Sendable {
+    var gate: @Sendable (_ providerID: String, _ model: String) -> UsageGateDecision
+    var record: @Sendable (_ providerID: String, _ model: String, _ usage: TokenUsage) -> Void
+    var limits: @Sendable (_ providerID: String, _ snapshot: ProviderLimitsSnapshot) -> Void
+    var warn: @Sendable (String) -> Void
+}
+
 final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked Sendable {
     let descriptor: ModelDescriptor
     private let settings: CloudBrainSettings
     private let session: URLSession
+    private let usage: UsageHooks?
     /// Avisos de espera para la pantalla (p. ej. «Groq pidió esperar 6 s»). `nil` = ya no hay espera.
     var onStatus: (@Sendable (String?) -> Void)?
 
-    init(descriptor: ModelDescriptor, settings: CloudBrainSettings) {
+    init(descriptor: ModelDescriptor, settings: CloudBrainSettings, usage: UsageHooks? = nil) {
         self.descriptor = descriptor
+        self.usage = usage
         self.settings = settings.sanitized()
         let configuration = URLSessionConfiguration.ephemeral          // sin caché ni cookies en disco
         configuration.timeoutIntervalForRequest = 30
@@ -40,6 +51,14 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    // Antes de cualquier cosa: ¿está autorizado el proveedor y cabe en el presupuesto? Si no, no sale nada de la app.
+                    if let hooks = self.usage {
+                        switch hooks.gate(self.preset.id, self.settings.model) {
+                        case .block(let reason): throw EngineError.generationFailed(reason)
+                        case .warn(let text): hooks.warn(text)
+                        case .allow: break
+                        }
+                    }
                     guard let key = CloudKeyStore.read(providerID: self.preset.id) else {
                         throw EngineError.notReady(self.missingKeyReason)
                     }
@@ -53,7 +72,8 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     urlRequest.httpBody = try OpenAIChatProtocol.requestBody(
                         model: self.settings.model, system: request.system, turns: request.turns,
-                        maxTokens: max(request.maxTokens, OpenAIChatProtocol.minimumCloudTokens), temperature: request.temperature)
+                        maxTokens: max(request.maxTokens, OpenAIChatProtocol.minimumCloudTokens), temperature: request.temperature,
+                        includeUsage: self.preset.streamUsage)
 
                     // Petición con reintentos: un 429 (límite del plan gratuito) con espera corta se espera y se reintenta,
                     // avisando en pantalla; un límite diario o una espera larga se informa tal cual, con las cifras del proveedor.
@@ -65,6 +85,13 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                             throw EngineError.generationFailed("Respuesta no válida del proveedor.")
                         }
                         if (200..<300).contains(http.statusCode) {
+                            // Lo que el proveedor informe sobre sus límites (si no informa nada, no se muestra nada).
+                            var lowered: [String: String] = [:]
+                            for (key, value) in http.allHeaderFields {
+                                if let name = key as? String, let text = value as? String { lowered[name.lowercased()] = text }
+                            }
+                            let snapshot = ProviderLimitsSnapshot.from(headers: lowered)
+                            if !snapshot.isEmpty { self.usage?.limits(self.preset.id, snapshot) }
                             opened = bytes
                             break
                         }
@@ -101,6 +128,16 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                     guard let bytes = opened else { throw EngineError.generationFailed("Respuesta no válida del proveedor.") }
                     var yielded = false
                     var finishReason: String?
+                    var reported: TokenUsage?
+                    var produced = ""
+                    let inputCharacters = request.system.count + request.turns.reduce(0) { $0 + $1.content.count }
+                    /// Anota el consumo: el que informó el proveedor o, si no informó, una estimación por el texto (marcada como tal).
+                    func recordUsage() {
+                        guard let hooks = self.usage else { return }
+                        let tokens = reported ?? TokenUsage(input: UsageEstimator.tokens(forCharacters: inputCharacters),
+                                                            output: UsageEstimator.tokens(forCharacters: produced.count), isEstimate: true)
+                        hooks.record(self.preset.id, self.settings.model, tokens)
+                    }
                     /// Respuesta sin una sola palabra porque el modelo agotó su límite pensando: se dice, en vez de dejarla vacía.
                     func finishStream() throws {
                         if !yielded, finishReason == "length" {
@@ -108,9 +145,11 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                         }
                     }
                     for try await line in bytes.lines {
+                        if let found = OpenAIChatProtocol.parseUsage(line) { reported = found }
                         switch OpenAIChatProtocol.parseStreamLine(line) {
                         case .delta(let text):
                             yielded = true
+                            produced += text
                             continuation.yield(text)
                         case .finish(let reason):
                             finishReason = reason
@@ -121,6 +160,7 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                                 let calls = ToolCallRecovery.extract(from: failed)
                                 if !calls.isEmpty {
                                     for call in calls { continuation.yield("\(Persona.toolOpen)\(call)\(Persona.toolClose)\n") }
+                                    recordUsage()
                                     continuation.finish()
                                     return
                                 }
@@ -128,12 +168,14 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                             throw EngineError.generationFailed("\(self.preset.displayName): \(message)")
                         case .done:
                             try finishStream()
+                            recordUsage()
                             continuation.finish()
                             return
                         case .ignore: continue
                         }
                     }
                     try finishStream()
+                    recordUsage()
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: EngineError.cancelled)

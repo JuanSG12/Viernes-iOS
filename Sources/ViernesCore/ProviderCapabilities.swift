@@ -131,6 +131,14 @@ public enum CapabilityMatrix {
                                                     excerptBudgetChars: 5_000,
                                                     note: sees ? "Modelo de visión de Groq (vista previa)." : "Modelo de texto de Groq; para imágenes usa el modelo de visión de su documentación."))
             }
+            if preset.id != CloudProviders.gemini.id {
+                // OpenAI, Cerebras y otros compatibles: solo texto mientras no haya una lectura de imágenes documentada y probada aquí.
+                return BrainProfile(
+                    id: "cloud:\(preset.id):\(settings.model)", displayName: "\(preset.displayName) · \(settings.model)",
+                    providerID: preset.id, model: settings.model, isCloud: true,
+                    capabilities: ModelCapabilities(excerptBudgetChars: 12_000,
+                                                    note: "Texto. Viernes aún no envía imágenes a este proveedor: para fotos usa Gemini, el modelo de visión de Groq o el OCR local."))
+            }
             let sees = settings.model.lowercased().hasPrefix("gemini")
             return BrainProfile(
                 id: "cloud:\(preset.id):\(settings.model)", displayName: "\(preset.displayName) · \(settings.model)",
@@ -143,7 +151,8 @@ public enum CapabilityMatrix {
 
     /// Variante de visión de un proveedor (misma clave, otro modelo), o `nil` si el proveedor no tiene una documentada.
     public static func visionProfile(providerID: String, chatModel: String, overrides: [String: String] = [:]) -> BrainProfile? {
-        guard let preset = CloudProviders.all.first(where: { $0.id == providerID }) else { return nil }
+        guard let preset = CloudProviders.all.first(where: { $0.id == providerID }),
+              preset.id == CloudProviders.groq.id || preset.id == CloudProviders.gemini.id else { return nil }
         let model = visionModel(providerID: providerID, chatModel: chatModel, overrides: overrides)
         let isGroq = preset.id == CloudProviders.groq.id
         return BrainProfile(
