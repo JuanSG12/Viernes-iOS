@@ -113,8 +113,15 @@ final class ViernesUITests: XCTestCase {
             let row = app.buttons[destination.id]
             reveal(row, in: app)
             XCTAssertTrue(row.waitForExistence(timeout: 5), "Falta la fila \(destination.id)")
-            row.tap()
-            XCTAssertTrue(app.navigationBars[destination.title].waitForExistence(timeout: 5), "No abrió \(destination.title)")
+            // Tras desplazar la lista, la fila puede seguir en movimiento: se espera a que sea tocable y se reintenta una vez.
+            let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: row)
+            _ = XCTWaiter().wait(for: [hittable], timeout: 5)
+            var opened = false
+            for _ in 0..<2 where !opened {
+                row.tap()
+                opened = app.navigationBars[destination.title].waitForExistence(timeout: 8)
+            }
+            XCTAssertTrue(opened, "No abrió \(destination.title)")
             app.navigationBars.buttons.element(boundBy: 0).tap()
         }
     }
