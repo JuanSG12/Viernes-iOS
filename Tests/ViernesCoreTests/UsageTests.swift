@@ -66,7 +66,7 @@ final class UsageTests: XCTestCase {
                                                         records: [record(6, at: now), record(4, at: now)], now: now) else {
             return XCTFail("Al llegar al límite debía bloquear")
         }
-        XCTAssertTrue(reason.contains("Alcanzaste el presupuesto") && reason.contains("no envié nada") && reason.contains("no cambio de proveedor"), reason)
+        XCTAssertTrue(reason.contains("Alcanzaste el presupuesto") && reason.contains("no envié nada") && reason.lowercased().contains("no cambio de proveedor"), reason)
     }
 
     func testOnlyThisMonthAndOnlyPaidProvidersCount() {
