@@ -256,6 +256,7 @@ final class AppModel: ObservableObject {
 
         recognition.load(persist: shouldKeepRecognitionHistory)
         _ = try? await conversations.prune(retention: settings.transcriptRetention)
+        await purgeExpiredMemories()
         await reloadMemory()
         await reloadHistory()
         await startLibrary()
@@ -1070,12 +1071,27 @@ final class AppModel: ObservableObject {
         unreadableMemoryCount = await memoryStore.unreadableCount()
     }
 
-    func addMemory(text: String, kind: MemoryKind) {
+    func addMemory(text: String, kind: MemoryKind, project: String? = nil, people: [String] = [], expiresAt: Date? = nil) {
         Task {
-            do { _ = try await memoryStore.remember(text: text, kind: kind, source: .userExplicit, policy: settings.memory) }
+            do { _ = try await memoryStore.remember(text: text, kind: kind, source: .userExplicit, policy: settings.memory,
+                                                    project: project, people: people, expiresAt: expiresAt) }
             catch { showBanner(error.localizedDescription) }
             await reloadMemory()
         }
+    }
+
+    /// Borra varios recuerdos a la vez (todo lo de un proyecto o una persona, o lo caducado).
+    func deleteMemories(_ items: [MemoryItem]) {
+        Task {
+            for item in items { try? await memoryStore.delete(id: item.id) }
+            await reloadMemory()
+        }
+    }
+
+    /// Lo caducado se borra al abrir la app: un recuerdo con fecha de caducidad vencida deja de existir.
+    func purgeExpiredMemories() async {
+        let all = (try? await memoryStore.all()) ?? []
+        for item in MemoryExpiry.expired(all) { try? await memoryStore.delete(id: item.id) }
     }
 
     func updateMemory(_ item: MemoryItem) {

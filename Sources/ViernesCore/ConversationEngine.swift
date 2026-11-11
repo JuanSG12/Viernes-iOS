@@ -337,6 +337,7 @@ public actor ConversationEngine {
             tools: availableTools(), claudeMode: config.claudeMode, spokenOutput: config.spokenOutput, profile: config.profile
         ))
         if hasBlock { baseSystem += "\n\n" + UntrustedContent.systemRules }
+        if !images.isEmpty { baseSystem += "\n\n" + Persona.visionRules }
         var system = baseSystem
 
         // El bloque de archivos ocupa parte de la petición: se recorta el historial para no pasarse del límite del proveedor.
@@ -673,14 +674,15 @@ public actor ConversationEngine {
             let text = call.args["text"] ?? ""
             let kind = call.args["kind"].flatMap(MemoryKind.init(rawValue:)) ?? MemoryCommand.classify(text)
             do {
-                let item = try await memory.remember(text: text, kind: kind, source: .userExplicit, policy: config.memoryPolicy, now: clock())
-                return .success("Guardado en memoria local: «\(item.text)»")
+                let item = try await memory.remember(text: text, kind: kind, source: .userExplicit, policy: config.memoryPolicy, now: clock(),
+                                                     project: call.args["project"], people: MemoryRelations.parsePeople(call.args["people"] ?? ""))
+                return .success("Guardado en memoria local: «\(item.text)»" + (MemoryRelations.summary(of: item).map { " (\($0))" } ?? ""))
             } catch { return .failure(error.localizedDescription) }
         case "search_memory":
             do {
                 let hits = try await memory.search(call.args["query"] ?? "", limit: 5, now: clock())
                 if hits.isEmpty { return .success("No hay recuerdos que coincidan.") }
-                return .success(hits.map { "• \($0.item.text)" }.joined(separator: "\n"))
+                return .success(hits.map { "• \($0.item.text)" + (MemoryRelations.summary(of: $0.item).map { " (\($0))" } ?? "") }.joined(separator: "\n"))
             } catch { return .failure(error.localizedDescription) }
         case "forget_memory":
             return await forget(query: call.args["query"] ?? "", alreadyConfirmed: true)

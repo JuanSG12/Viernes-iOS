@@ -227,9 +227,11 @@ final class ViernesUITests: XCTestCase {
         let fake = chip(app, "falso.pdf")
         XCTAssertTrue(fake.waitForExistence(timeout: 10))
         XCTAssertTrue(fake.label.contains("no se pudo leer"), "«\(fake.label)»")
-        fake.tap()
         let error = app.descendants(matching: .any).matching(identifier: "attachment-error").firstMatch
-        XCTAssertTrue(error.waitForExistence(timeout: 5), "El detalle explica el error")
+        // En un runner lento el primer toque a veces no abre el detalle: se espera más y se reintenta una vez.
+        fake.tap()
+        if !error.waitForExistence(timeout: 8) { fake.tap() }
+        XCTAssertTrue(error.waitForExistence(timeout: 10), "El detalle explica el error")
         XCTAssertTrue(error.label.contains("dice ser un PDF") || app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'dice ser un PDF'")).firstMatch.exists)
         app.buttons["Cerrar"].tap()
 

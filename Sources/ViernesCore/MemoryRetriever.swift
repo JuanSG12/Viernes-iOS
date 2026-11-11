@@ -8,8 +8,10 @@ public enum MemoryRetriever {
         guard !queryStems.isEmpty, limit > 0 else { return [] }
 
         var scored: [ScoredMemory] = []
-        for item in items {
-            let itemStems = Set(TextNormalizer.tokens(item.text + " " + item.tags.joined(separator: " ")).map(TextNormalizer.stem))
+        for item in items where !item.isExpired(at: now) {
+            let related = ((item.project ?? "") + " " + (item.people ?? []).joined(separator: " "))
+            let relatedStems = Set(TextNormalizer.tokens(related).map(TextNormalizer.stem))
+            let itemStems = Set(TextNormalizer.tokens(item.text + " " + item.tags.joined(separator: " ") + " " + related).map(TextNormalizer.stem))
             guard !itemStems.isEmpty else { continue }
             let overlap = Double(queryStems.intersection(itemStems).count)
             guard overlap > 0 else { continue }
@@ -17,6 +19,8 @@ public enum MemoryRetriever {
             // Cobertura de la consulta + precisión sobre el recuerdo.
             var score = overlap / Double(queryStems.count) * 2.0 + overlap / Double(itemStems.count)
             if item.pinned { score += 0.5 }
+            // Contexto: lo que pertenece al proyecto o a la persona que menciona la pregunta pesa más.
+            if !queryStems.intersection(relatedStems).isEmpty { score += 0.75 }
             let ageDays = max(0, now.timeIntervalSince(item.updatedAt) / 86_400)
             score *= 1.0 / (1.0 + ageDays / 365.0)     // decae suavemente en un año
             scored.append(ScoredMemory(item: item, score: score))
@@ -26,7 +30,7 @@ public enum MemoryRetriever {
 
     /// Fijados + coincidencias, sin duplicados, para inyectar en el prompt.
     public static func context(query: String, items: [MemoryItem], limit: Int, now: Date = Date()) -> [MemoryItem] {
-        let active = items.filter { !$0.isPending }
+        let active = items.filter { !$0.isPending && !$0.isExpired(at: now) }
         let pinned = active.filter(\.pinned).prefix(3)
         var result = Array(pinned)
         for hit in rank(query: query, items: active, limit: limit, now: now) where !result.contains(where: { $0.id == hit.item.id }) {

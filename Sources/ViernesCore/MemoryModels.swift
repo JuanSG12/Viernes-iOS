@@ -34,11 +34,17 @@ public struct MemoryItem: Identifiable, Codable, Equatable, Sendable {
     public var lastUsedAt: Date?
     /// Sugerencia pendiente de aprobación: nunca se inyecta en prompts hasta aprobarse.
     public var isPending: Bool
+    /// Caducidad: pasada esta fecha el recuerdo deja de usarse y se borra. `nil` = no caduca. Opcional: lo guardado antes se lee igual.
+    public var expiresAt: Date?
+    /// Proyecto al que pertenece y personas con las que se relaciona (para recuperarlo por contexto). Opcionales por la misma razón.
+    public var project: String?
+    public var people: [String]?
 
     public init(
         id: UUID = UUID(), kind: MemoryKind, text: String, tags: [String] = [],
         source: MemorySource, pinned: Bool = false, createdAt: Date = Date(),
-        updatedAt: Date? = nil, lastUsedAt: Date? = nil, isPending: Bool = false
+        updatedAt: Date? = nil, lastUsedAt: Date? = nil, isPending: Bool = false,
+        expiresAt: Date? = nil, project: String? = nil, people: [String]? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -50,6 +56,9 @@ public struct MemoryItem: Identifiable, Codable, Equatable, Sendable {
         self.updatedAt = updatedAt ?? createdAt
         self.lastUsedAt = lastUsedAt
         self.isPending = isPending
+        self.expiresAt = expiresAt
+        self.project = project
+        self.people = people
     }
 }
 
@@ -146,7 +155,7 @@ public protocol MemoryStore: AnyObject, Sendable {
 
 public extension MemoryStore {
     func search(_ query: String, limit: Int = 5, now: Date = Date()) async throws -> [ScoredMemory] {
-        let items = try await all().filter { !$0.isPending }
+        let items = try await all().filter { !$0.isPending && !$0.isExpired(at: now) }
         return MemoryRetriever.rank(query: query, items: items, limit: limit, now: now)
     }
 
@@ -158,7 +167,8 @@ public extension MemoryStore {
     @discardableResult
     func remember(
         text: String, kind: MemoryKind, source: MemorySource,
-        policy: MemoryPolicy, pending: Bool = false, now: Date = Date()
+        policy: MemoryPolicy, pending: Bool = false, now: Date = Date(),
+        project: String? = nil, people: [String] = [], expiresAt: Date? = nil
     ) async throws -> MemoryItem {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw MemoryError.emptyText }
@@ -168,15 +178,21 @@ public extension MemoryStore {
 
         // Evita duplicados exactos (ignorando mayúsculas y acentos).
         let folded = TextNormalizer.fold(trimmed)
+        let relations = MemoryRelations.clean(project: project, people: people)
         if var existing = try await all().first(where: { TextNormalizer.fold($0.text) == folded }) {
             existing.updatedAt = now
             if !pending { existing.isPending = false }
+            if let project = relations.project { existing.project = project }
+            if let people = relations.people { existing.people = people }
+            if let expiresAt = expiresAt { existing.expiresAt = expiresAt }
             try await upsert(existing)
             return existing
         }
+        // Un resumen de conversación es un recuerdo EPISÓDICO: caduca a los 90 días salvo que el usuario lo fije o cambie la fecha.
+        let expiry = expiresAt ?? (kind == .summary ? now.addingTimeInterval(MemoryRelations.summaryLifetime) : nil)
         let item = MemoryItem(
             kind: kind, text: trimmed, tags: Array(Set(TextNormalizer.tokens(trimmed))).sorted().prefix(8).map { $0 },
-            source: source, createdAt: now, isPending: pending
+            source: source, createdAt: now, isPending: pending, expiresAt: expiry, project: relations.project, people: relations.people
         )
         try await upsert(item)
         return item

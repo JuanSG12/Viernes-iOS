@@ -246,7 +246,9 @@ public enum ToolCatalog {
             summary: "Guarda un recuerdo local (preferencia, proyecto o dato) que el usuario pidió conservar.",
             parameters: [
                 ToolParameter("text", "Texto del recuerdo, redactado de forma autocontenida"),
-                ToolParameter("kind", "preference, project o fact", required: false)
+                ToolParameter("kind", "preference, project o fact", required: false),
+                ToolParameter("project", "Nombre del proyecto al que pertenece, si el usuario lo dijo", required: false),
+                ToolParameter("people", "Personas relacionadas, separadas por comas, si el usuario las dijo", required: false)
             ], risk: .sensitive),
         ToolDefinition(
             name: "search_memory",

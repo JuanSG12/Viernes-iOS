@@ -8,6 +8,7 @@ struct MemoryView: View {
     @State private var editing: MemoryItem?
     @State private var adding = false
     @State private var confirmDeleteAll = false
+    @State private var entityToDelete: MemoryEntity?
 
     private var filtered: [MemoryItem] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return model.memoryItems }
@@ -63,6 +64,34 @@ struct MemoryView: View {
                     }
                 }
             }
+            let entities = MemoryGraph.entities(model.memoryItems)
+            if !entities.isEmpty {
+                Section("Personas y proyectos") {
+                    ForEach(entities) { entity in
+                        Button { query = entity.name } label: {
+                            Label("\(entity.name) · \(entity.count) recuerdo\(entity.count == 1 ? "" : "s")",
+                                  systemImage: entity.kind == .person ? "person" : "folder")
+                                .foregroundStyle(Theme.textPrimary)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { entityToDelete = entity } label: { Label("Borrar todo", systemImage: "trash") }
+                        }
+                        .accessibilityIdentifier("memory-entity")
+                    }
+                    ForEach(MemoryGraph.links(model.memoryItems)) { link in
+                        Label("\(link.person) ↔ \(link.project) (\(link.count))", systemImage: "link").font(.footnote).foregroundStyle(Theme.textSecondary)
+                    }
+                    Text("Toca un nombre para ver sus recuerdos; desliza para borrar todo lo de esa persona o proyecto.").font(.caption2).foregroundStyle(Theme.textSecondary)
+                }
+                .listRowBackground(Theme.carbon.opacity(0.5))
+            }
+            let expired = MemoryExpiry.expired(model.memoryItems)
+            if !expired.isEmpty {
+                Section {
+                    Button("Borrar \(expired.count) recuerdo\(expired.count == 1 ? "" : "s") caducado\(expired.count == 1 ? "" : "s")", role: .destructive) { model.deleteMemories(expired) }
+                }
+                .listRowBackground(Theme.carbon.opacity(0.5))
+            }
             Section("Recuerdos (\(model.memoryItems.count))") {
                 if filtered.isEmpty {
                     Text(model.memoryItems.isEmpty ? "Aún no hay recuerdos. Dile «recuerda que…» o añade uno con +." : "Sin resultados.")
@@ -75,7 +104,9 @@ struct MemoryView: View {
                                 if item.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(Theme.accent) }
                                 Text(item.text).foregroundStyle(Theme.textPrimary).multilineTextAlignment(.leading)
                             }
-                            Text("\(item.kind.displayName) · \(item.updatedAt.formatted(date: .abbreviated, time: .omitted))")
+                            Text("\(item.kind.displayName) · \(item.updatedAt.formatted(date: .abbreviated, time: .omitted))"
+                                 + (MemoryRelations.summary(of: item).map { " · " + $0 } ?? "")
+                                 + (item.expiresAt.map { " · caduca \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""))
                                 .font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                     }
@@ -107,6 +138,12 @@ struct MemoryView: View {
         }
         .sheet(item: $editing) { item in NavigationStack { MemoryEditor(item: item) }.environmentObject(model).presentationBackground(Theme.ink) }
         .sheet(isPresented: $adding) { NavigationStack { MemoryEditor(item: nil) }.environmentObject(model).presentationBackground(Theme.ink) }
+        .confirmationDialog("¿Borrar lo relacionado?", isPresented: Binding(get: { entityToDelete != nil }, set: { if !$0 { entityToDelete = nil } }), titleVisibility: .visible,
+                            presenting: entityToDelete) { entity in
+            Button("Borrar los recuerdos de «\(entity.name)»", role: .destructive) {
+                model.deleteMemories(MemoryGraph.related(to: entity.name, in: model.memoryItems))
+            }
+        } message: { entity in Text("Se eliminan \(entity.count) recuerdo(s) relacionados con «\(entity.name)». No se puede deshacer.") }
         .confirmationDialog("¿Borrar toda la memoria?", isPresented: $confirmDeleteAll, titleVisibility: .visible) {
             Button("Borrar todo", role: .destructive) { model.deleteAllMemory() }
         } message: { Text("Se eliminarán todos los recuerdos y sugerencias. No se puede deshacer.") }
@@ -120,6 +157,33 @@ struct MemoryEditor: View {
     @State private var text = ""
     @State private var kind: MemoryKind = .fact
     @State private var pinned = false
+    @State private var project = ""
+    @State private var peopleText = ""
+    @State private var expiry: Expiry = .never
+
+    /// Cuánto dura un recuerdo. En un recuerdo existente, «Mantener» conserva su fecha actual.
+    private enum Expiry: String, CaseIterable, Identifiable {
+        case keep, never, week, month, year
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .keep: return "Mantener la fecha actual"
+            case .never: return "No caduca"
+            case .week: return "En 1 semana"
+            case .month: return "En 1 mes"
+            case .year: return "En 1 año"
+            }
+        }
+        func date(from now: Date, current: Date?) -> Date? {
+            switch self {
+            case .keep: return current
+            case .never: return nil
+            case .week: return now.addingTimeInterval(7 * 86_400)
+            case .month: return now.addingTimeInterval(30 * 86_400)
+            case .year: return now.addingTimeInterval(365 * 86_400)
+            }
+        }
+    }
 
     private var sensitive: Bool { SensitiveDataRedactor.scan(text).isSensitive }
 
@@ -131,6 +195,15 @@ struct MemoryEditor: View {
                     ForEach(MemoryKind.allCases.filter { $0 != .summary || item?.kind == .summary }, id: \.self) { Text($0.displayName).tag($0) }
                 }
                 Toggle("Fijar (siempre disponible)", isOn: $pinned)
+            }
+            Section("Contexto (opcional)") {
+                TextField("Proyecto", text: $project).accessibilityIdentifier("memory-project")
+                TextField("Personas (separadas por comas)", text: $peopleText).accessibilityIdentifier("memory-people")
+                Picker("Caducidad", selection: $expiry) {
+                    ForEach(Expiry.allCases.filter { $0 != .keep || item?.expiresAt != nil }) { Text($0.label).tag($0) }
+                }
+                Text("El proyecto y las personas ayudan a encontrar este recuerdo cuando hablas de ellos. Un recuerdo caducado deja de usarse y se borra solo.")
+                    .font(.footnote).foregroundStyle(Theme.textSecondary)
             }
             if sensitive {
                 Section { Label("Parece contener datos sensibles (contraseña, tarjeta, documento o clave). Viernes no los guarda.", systemImage: "exclamationmark.shield").foregroundStyle(Theme.alert).font(.footnote) }
@@ -147,19 +220,29 @@ struct MemoryEditor: View {
             }
         }
         .onAppear {
-            if let item = item { text = item.text; kind = item.kind; pinned = item.pinned }
+            if let item = item {
+                text = item.text; kind = item.kind; pinned = item.pinned
+                project = item.project ?? ""
+                peopleText = (item.people ?? []).joined(separator: ", ")
+                expiry = item.expiresAt != nil ? .keep : .never
+            }
         }
     }
 
     private func save() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let relations = MemoryRelations.clean(project: project, people: MemoryRelations.parsePeople(peopleText))
         if var existing = item {
             existing.text = trimmed
             existing.kind = kind
             existing.pinned = pinned
+            existing.project = relations.project
+            existing.people = relations.people
+            existing.expiresAt = expiry.date(from: Date(), current: existing.expiresAt)
             model.updateMemory(existing)
         } else {
-            model.addMemory(text: trimmed, kind: kind)
+            model.addMemory(text: trimmed, kind: kind, project: relations.project, people: relations.people ?? [],
+                            expiresAt: expiry.date(from: Date(), current: nil))
         }
         dismiss()
     }

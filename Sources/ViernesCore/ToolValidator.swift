@@ -289,6 +289,10 @@ public enum ToolValidator {
             if let kind = args["kind"], MemoryKind(rawValue: kind) == nil || kind == "summary" {
                 throw fail("«kind» debe ser preference, project o fact.")
             }
+            if let project = args["project"], project.count > MemoryRelations.maxNameLength { throw fail("el nombre del proyecto es demasiado largo.") }
+            if let people = args["people"], MemoryRelations.parsePeople(people).contains(where: { $0.count > MemoryRelations.maxNameLength }) {
+                throw fail("el nombre de una persona es demasiado largo.")
+            }
         default:
             break
         }
