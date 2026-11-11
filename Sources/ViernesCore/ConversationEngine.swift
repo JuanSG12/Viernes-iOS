@@ -9,6 +9,22 @@ public enum ConversationEvent: Sendable {
     case failed(String)
 }
 
+/// Recoge, de forma segura entre hilos, los registros de acciones de los pasos de una misión que corren en paralelo.
+private final class MissionRecords: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [ActionRecord] = []
+    func add(_ record: ActionRecord) {
+        lock.lock()
+        items.append(record)
+        lock.unlock()
+    }
+    var records: [ActionRecord] {
+        lock.lock()
+        defer { lock.unlock() }
+        return items
+    }
+}
+
 public struct ConversationConfig: Sendable {
     public var memoryPolicy: MemoryPolicy
     public var claudeMode: ClaudeMode
@@ -27,13 +43,17 @@ public struct ConversationConfig: Sendable {
     public var askBeforeCloudLibrary: Bool
     /// Perfil activo: identidad, personalidad, idioma, autonomía y herramientas apagadas.
     public var profile: ProfileSettings
+    /// Reconocer misiones conocidas («organiza mi día»): varios pasos planeados, con consultas en paralelo y resultados reales.
+    public var missionsEnabled: Bool
 
     /// 4 rondas = hasta 3 rondas de herramientas encadenadas (consultar → actuar → …) y una respuesta final.
     public init(memoryPolicy: MemoryPolicy = .default, claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true,
                 maxToolRounds: Int = 4, maxCallsPerRound: Int = 3, historyCharBudget: Int = 6_000,
                 memoryContextLimit: Int = 5, timeZone: TimeZone = .current,
                 calendarReadEnabled: Bool = false, contactsReadEnabled: Bool = false,
-                libraryEnabled: Bool = true, askBeforeCloudLibrary: Bool = true, profile: ProfileSettings = .default) {
+                libraryEnabled: Bool = true, askBeforeCloudLibrary: Bool = true, profile: ProfileSettings = .default,
+                missionsEnabled: Bool = true) {
+        self.missionsEnabled = missionsEnabled
         self.profile = profile.sanitized()
         self.libraryEnabled = libraryEnabled
         self.askBeforeCloudLibrary = askBeforeCloudLibrary
@@ -65,6 +85,8 @@ public actor ConversationEngine {
     private var documentNotes: [String: String] = [:]
     /// Biblioteca de conocimiento personal (separada de la memoria): se consulta con permiso y siempre con fuentes.
     private var knowledge: KnowledgeProvider?
+    /// Historial de misiones (estado de cada una, para recuperarlas tras un cierre inesperado).
+    private var missions: MissionStore?
     private let maxStoredMessages = 60
 
     /// Estado de UNA respuesta: si lo que ve el modelo incluye contenido de archivos o de la biblioteca (no confiable) y qué fuentes se usaron.
@@ -91,7 +113,8 @@ public actor ConversationEngine {
 
     public init(engine: LanguageModelEngine, memory: MemoryStore, executor: ToolExecutor?,
                 confirmer: ConfirmationProvider?, config: ConversationConfig = ConversationConfig(),
-                knowledge: KnowledgeProvider? = nil, clock: @escaping @Sendable () -> Date = { Date() }) {
+                knowledge: KnowledgeProvider? = nil, clock: @escaping @Sendable () -> Date = { Date() }, missions: MissionStore? = nil) {
+        self.missions = missions
         self.knowledge = knowledge
         self.engine = engine
         self.memory = memory
@@ -105,6 +128,40 @@ public actor ConversationEngine {
 
     public func setEngine(_ engine: LanguageModelEngine) { self.engine = engine }
     public func setKnowledge(_ provider: KnowledgeProvider?) { knowledge = provider }
+    public func setMissions(_ store: MissionStore?) { missions = store }
+
+    // MARK: Misiones
+
+    /// Tras un cierre inesperado, lo que quedó «en curso» pasa a «interrumpida» (nunca se finge que terminó).
+    public func recoverMissions() async {
+        guard let store = missions else { return }
+        let saved = await store.loadAll()
+        let marked = MissionRunner.markInterrupted(saved)
+        for (before, after) in zip(saved, marked) where before != after { await store.save(after) }
+    }
+
+    public func missionHistory() async -> [MissionState] { await missions?.loadAll() ?? [] }
+
+    static func isTransient(_ reason: String) -> Bool {
+        let folded = TextNormalizer.fold(reason)
+        return ["conexion", "internet", "tardo", "tiempo de espera", "no pude consultar", "no pude obtener", "intentalo de nuevo"].contains { folded.contains($0) }
+    }
+
+    static func outcome(from record: ActionRecord) -> StepOutcome {
+        switch record.outcome {
+        case .executed(let text): return StepOutcome(ok: true, text: text)
+        case .declined: return StepOutcome(ok: false, text: "El usuario no lo autorizó.")
+        case .failed(let reason): return StepOutcome(ok: false, text: reason, transient: isTransient(reason))
+        }
+    }
+
+    /// Reanuda una misión interrumpida o cancelada: solo repite los pasos que no terminaron (con las mismas validaciones y permisos).
+    public func resumeMission(_ saved: MissionState) async -> MissionState {
+        let run = RunState(tainted: false, brainIsCloud: engine.descriptor.isCloud, brainName: engine.descriptor.displayName)
+        return await MissionRunner(store: missions, clock: clock).resume(saved) { [self] step in
+            Self.outcome(from: await self.perform(ToolCall(name: step.tool, args: step.args), run: run))
+        }
+    }
     public func updateConfig(_ config: ConversationConfig) { self.config = config }
     public func resetConversation() { history.removeAll(); activeDocuments.removeAll(); documentNotes.removeAll() }
     public func restore(_ messages: [ChatMessage]) {
@@ -247,6 +304,23 @@ public actor ConversationEngine {
             actions.append(record)
             out.yield(.action(record))
             firstUserSuffix = "\n\n" + Persona.wrapResults([Self.describe(record)])
+        }
+
+        // 1b) Misión conocida («organiza mi día»): se planean varios pasos, las consultas corren en paralelo y el modelo recibe los
+        // resultados REALES de cada uno (nunca inventa lo que falló). Son consultas: no piden confirmación.
+        if config.missionsEnabled, executor != nil, let kind = MissionTemplates.match(trimmed) {
+            let memories = (try? await memory.all()) ?? []
+            let plan = MissionTemplates.plan(kind, goal: trimmed, context: MissionContext(city: MissionContext.city(in: trimmed, memories: memories)))
+            let collected = MissionRecords()
+            let state = await MissionRunner(store: missions, clock: clock).run(plan) { [self] step in
+                out.yield(.toolStarted(step.tool))
+                let record = await self.perform(ToolCall(name: step.tool, args: step.args), run: run)
+                collected.add(record)
+                out.yield(.action(record))
+                return Self.outcome(from: record)
+            }
+            actions.append(contentsOf: collected.records)
+            firstUserSuffix += "\n\n" + Persona.wrapResults(MissionReport.resultLines(state))
         }
 
         // 2) Contexto de memoria local para este mensaje.

@@ -35,6 +35,7 @@ struct ProfileDisk {
         }
         urls.append(url(layout.recognitionHistoryPath))
         urls.append(url(layout.usageHistoryPath))
+        urls.append(url(layout.missionsPath))
         return urls
     }
 

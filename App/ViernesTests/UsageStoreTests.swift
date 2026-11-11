@@ -62,3 +62,35 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertFalse(flag.recorded, "Lo que no se envió no se anota como consumo")
     }
 }
+
+/// Historial de misiones: cifrado con la clave del perfil, recuperable tras reiniciar, ilegible con otra clave y borrable.
+final class MissionLogTests: XCTestCase {
+    func testMissionsPersistEncryptedAndStayPerProfile() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("viernes-mission-tests-\(UUID().uuidString)", isDirectory: true)
+        let service = "test.viernes.missions.\(UUID().uuidString)"
+        func vault(_ account: String) -> Vault { Vault(keychain: KeychainStore(service: service), account: account) }
+        defer {
+            try? FileManager.default.removeItem(at: base)
+            for account in ["vault.key.v1.a", "vault.key.v1.b"] { try? KeychainStore(service: service).delete(account: account) }
+        }
+
+        let log = MissionLog(vault: vault("vault.key.v1.a"), path: "missions.bin", base: base)
+        let plan = MissionTemplates.plan(.today, goal: "organiza mi día secreto", context: MissionContext())
+        var state = MissionState(plan: plan)
+        state.status = .running
+        await log.save(state)
+
+        let bytes = try Data(contentsOf: base.appendingPathComponent("missions.bin"))
+        XCTAssertNil(bytes.range(of: Data("secreto".utf8)), "El historial de misiones no está en claro en disco")
+        let reopened = MissionLog(vault: vault("vault.key.v1.a"), path: "missions.bin", base: base)
+        let loaded = await reopened.loadAll()
+        XCTAssertEqual(loaded.count, 1, "Sobrevive a reiniciar")
+        XCTAssertEqual(loaded.first?.status, .running)
+        let other = MissionLog(vault: vault("vault.key.v1.b"), path: "missions.bin", base: base)
+        let foreign = await other.loadAll()
+        XCTAssertTrue(foreign.isEmpty, "Con la clave de otro perfil no se lee")
+
+        await log.deleteAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: base.appendingPathComponent("missions.bin").path))
+    }
+}

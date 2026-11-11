@@ -104,6 +104,9 @@ final class AppModel: ObservableObject {
     let recognition: RecognitionHistory
     /// Consumo de los proveedores en la nube de este perfil: historial cifrado, presupuesto y límites informados.
     let usage: UsageStore
+    /// Historial de misiones del agente de este perfil (cifrado).
+    let missionLog: MissionLog
+    @Published var missionStates: [MissionState] = []
     /// Métricas de los últimos turnos de voz (informe de rendimiento).
     let voiceMetrics = VoiceMetricsStore()
     /// Adjuntos del mensaje en preparación (fototeca, cámara, escáner, Archivos) con su estado real de lectura.
@@ -177,6 +180,8 @@ final class AppModel: ObservableObject {
         let usageStore = UsageStore(vault: vault, path: layout.usageHistoryPath)
         usageStore.settings = loaded.usageSettings
         usage = usageStore
+        let missions = MissionLog(vault: vault, path: layout.missionsPath)
+        missionLog = missions
         let library = KnowledgeEngine(store: libraryStore, embedder: LibraryEmbedder.make())
         knowledge = library
         let executor = DeviceToolExecutor(claude: claude, mailDrafts: mailDrafts, ledger: EventLedger(defaults: defaults, key: layout.createdEventsKey))
@@ -190,7 +195,7 @@ final class AppModel: ObservableObject {
                                                                      libraryEnabled: loaded.attachmentSettings.libraryOn,
                                                                      askBeforeCloudLibrary: loaded.attachmentSettings.askBeforeCloud,
                                                                      profile: loaded.profileSettings),
-                                          knowledge: library)
+                                          knowledge: library, missions: missions)
         wireServices()
         speaker.pronunciation = loaded.profileSettings.personality.pronunciation
         memoryUnlocked = !loaded.requireBiometricsForMemory      // con Face ID exigido, la memoria arranca BLOQUEADA
@@ -232,6 +237,8 @@ final class AppModel: ObservableObject {
         }
         // Los errores técnicos del motor van al registro local, nunca a la conversación.
         await conversation.setDiagnostics { Diagnostics.shared.log($0) }
+        await conversation.recoverMissions()
+        await reloadMissions()
         claude.config = settings.claude
         speaker.apply(settings.voice)
         voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)
@@ -1097,6 +1104,8 @@ final class AppModel: ObservableObject {
             recognition.clear()
             tools.clearLedger()
             usage.clear()
+            await missionLog.deleteAll()
+            missionStates = []
             CloudKeyStore.deleteAll()
             settingsStore.reset()
             attachments.purgeAll()
@@ -1107,6 +1116,26 @@ final class AppModel: ObservableObject {
             await reloadMemory()
             await reloadHistory()
             showBanner("Todos los datos locales de Viernes fueron eliminados.")
+        }
+    }
+
+    // MARK: Misiones
+
+    func reloadMissions() async { missionStates = await conversation.missionHistory() }
+
+    /// Repite SOLO los pasos que no terminaron de una misión interrumpida o cancelada (con los mismos permisos y validaciones).
+    func resumeMission(_ id: UUID) {
+        guard let saved = missionStates.first(where: { $0.id == id }) else { return }
+        Task {
+            _ = await conversation.resumeMission(saved)
+            await reloadMissions()
+        }
+    }
+
+    func clearMissions() {
+        Task {
+            await missionLog.deleteAll()
+            await reloadMissions()
         }
     }
 

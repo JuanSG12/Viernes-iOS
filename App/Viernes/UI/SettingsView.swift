@@ -30,6 +30,9 @@ struct SettingsView: View {
                 NavigationLink { UsageView() } label: {
                     row(icon: "chart.bar", title: "Consumo y presupuesto", detail: "Tokens, costo estimado, límite mensual, proveedores autorizados", status: nil)
                 }.accessibilityIdentifier("settings-usage")
+                NavigationLink { MissionsView() } label: {
+                    row(icon: "checklist", title: "Misiones del agente", detail: "Tareas de varios pasos, con resultados reales", status: nil)
+                }.accessibilityIdentifier("settings-missions")
                 NavigationLink { ClaudeSettingsView() } label: {
                     row(icon: "arrow.up.forward.app", title: "Claude", detail: model.settings.claude.mode.displayName, status: nil)
                 }.accessibilityIdentifier("settings-claude")
