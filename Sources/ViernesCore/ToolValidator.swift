@@ -233,6 +233,7 @@ public enum ToolValidator {
             try validateEventTarget(&args, tool: call.name, timeZone: timeZone)
             if call.name == "update_event" { try validateEventChanges(&args, tool: call.name, timeZone: timeZone) }
         case "compose_email":
+            if let contact = args["contact"], contact.count > 100 { throw fail("el nombre del contacto es demasiado largo.") }
             if let rawTo = args["to"] {
                 // Una dirección dictada («juan arroba gmail punto com») o con espacios se limpia antes de validar.
                 let cleaned = SpokenText.cleanEmailAddress(rawTo)
@@ -243,15 +244,23 @@ public enum ToolValidator {
             }
             if let subject = args["subject"], subject.count > 200 || subject.contains("\n") { throw fail("asunto no válido.") }
         case "compose_message":
-            if let to = args["to"], ContactFormat.normalizedPhone(to) == nil { throw fail("teléfono no válido.") }
+            if let contact = args["contact"], contact.count > 100 { throw fail("el nombre del contacto es demasiado largo.") }
+            if let to = args["to"], ContactFormat.normalizedPhone(to) == nil {
+                throw fail("«to» debe ser un teléfono. Si es el nombre de una persona, pásalo en «contact».")
+            }
             if let app = args["app"] {
                 let folded = app.lowercased()
                 guard ["sms", "whatsapp"].contains(folded) else { throw fail("«app» debe ser sms o whatsapp.") }
                 args["app"] = folded
             }
         case "call_phone":
-            guard let phone = ContactFormat.normalizedPhone(args["number"]!) else { throw fail("teléfono no válido.") }
-            args["number"] = phone
+            if let contact = args["contact"], contact.count > 100 { throw fail("el nombre del contacto es demasiado largo.") }
+            if let number = args["number"] {
+                guard let phone = ContactFormat.normalizedPhone(number) else { throw fail("teléfono no válido.") }
+                args["number"] = phone
+            } else if args["contact"] == nil {
+                throw fail("indica «contact» (nombre de la persona) o «number».")
+            }
         case "get_weather":
             let city = args["city"]!
             guard city.count <= 80, !city.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {

@@ -199,7 +199,8 @@ public enum ToolCatalog {
             summary: "Prepara un BORRADOR de correo en la app Correo. No envía nada: el usuario revisa y pulsa Enviar.",
             parameters: [
                 ToolParameter("body", "Texto del correo"),
-                ToolParameter("to", "Dirección de correo del destinatario", required: false),
+                ToolParameter("to", "Dirección de correo del destinatario (solo si el usuario la dijo)", required: false),
+                ToolParameter("contact", "Nombre de la persona: la app busca su correo en los contactos", required: false),
                 ToolParameter("subject", "Asunto", required: false)
             ], risk: .reversible),
         ToolDefinition(
@@ -207,13 +208,19 @@ public enum ToolCatalog {
             summary: "Prepara un BORRADOR de mensaje (SMS/iMessage o WhatsApp). No envía nada: el usuario revisa y pulsa Enviar.",
             parameters: [
                 ToolParameter("body", "Texto del mensaje"),
-                ToolParameter("to", "Teléfono del destinatario con prefijo, p. ej. +573001234567", required: false),
+                ToolParameter("contact", "Nombre de la persona («Karen»): la app la busca en los contactos, elige su móvil y le da formato internacional", required: false),
+                ToolParameter("to", "Teléfono, solo si el usuario lo dijo (con o sin prefijo)", required: false),
+                ToolParameter("digits", "Últimas cifras del número elegido, si el contacto tenía varios", required: false),
                 ToolParameter("app", "sms (por defecto) o whatsapp", required: false)
             ], risk: .reversible),
         ToolDefinition(
             name: "call_phone",
-            summary: "Abre el marcador del teléfono con un número. iOS pide su propia confirmación antes de llamar.",
-            parameters: [ToolParameter("number", "Número con prefijo, p. ej. +573001234567")],
+            summary: "Abre el marcador del teléfono. iOS pide su propia confirmación antes de llamar. Indica «contact» (nombre) o «number».",
+            parameters: [
+                ToolParameter("contact", "Nombre de la persona: la app busca su teléfono en los contactos", required: false),
+                ToolParameter("number", "Número, solo si el usuario lo dijo", required: false),
+                ToolParameter("digits", "Últimas cifras del número elegido, si el contacto tenía varios", required: false)
+            ],
             risk: .reversible),
         ToolDefinition(
             name: "ask_claude",

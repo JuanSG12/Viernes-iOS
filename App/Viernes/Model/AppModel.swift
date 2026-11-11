@@ -176,6 +176,8 @@ final class AppModel: ObservableObject {
         knowledge = library
         let executor = DeviceToolExecutor(claude: claude, mailDrafts: mailDrafts, ledger: EventLedger(defaults: defaults, key: layout.createdEventsKey))
         tools = executor
+        executor.contactsReadSetting = loaded.contactsRead
+        executor.defaultRegion = loaded.profileSettings.region
         conversation = ConversationEngine(engine: engine, memory: memory, executor: executor, confirmer: confirmation,
                                           config: ConversationConfig(memoryPolicy: loaded.memory, claudeMode: loaded.claude.mode,
                                                                      calendarReadEnabled: loaded.calendarReadEnabled,
@@ -386,6 +388,8 @@ final class AppModel: ObservableObject {
         settingsStore.save(settings)
         if settings.voice != old.voice { speaker.apply(settings.voice) }
         if settings.claude != old.claude { claude.config = settings.claude }
+        if settings.contactsRead != old.contactsRead { tools.contactsReadSetting = settings.contactsRead }
+        if settings.profile != old.profile { tools.defaultRegion = settings.profileSettings.region }
         if settings.cloudBrain != old.cloudBrain { refreshCloudEngine() }
         if settings.recognitionLocale != old.recognitionLocale {
             voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)

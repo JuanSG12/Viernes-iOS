@@ -64,7 +64,7 @@ final class DeviceToolExecutor: ToolExecutor {
         case "find_contact": return await findContact(name: call.args["name"] ?? "")
         case "compose_email": return await composeEmail(call.args)
         case "compose_message": return await composeMessage(call.args)
-        case "call_phone": return await callPhone(call.args["number"] ?? "")
+        case "call_phone": return await callPhone(call.args)
         default: return .failure("Herramienta no implementada: \(call.name).")
         }
     }
@@ -541,49 +541,45 @@ final class DeviceToolExecutor: ToolExecutor {
         }
     }
 
+    /// Política de lectura de contactos del perfil: `false` = el usuario la apagó; `nil` = nunca la tocó (se permite si iOS ya le dio acceso).
+    var contactsReadSetting: Bool?
+    /// Región del perfil: da el código de país a los números locales.
+    var defaultRegion = "CO"
+    var directory: ContactDirectory = SystemContactDirectory()
+
+    /// Punto único para resolver a una persona: lo usan WhatsApp, SMS, llamadas y correo. Los resultados que vuelven al modelo no llevan números completos.
+    private func resolveRecipient(_ name: String, kind: RecipientKind, digits: String?) async -> RecipientOutcome {
+        if contactsReadSetting == false {
+            return .noValue("El usuario apagó la lectura de contactos en Ajustes › Privacidad, así que no puedo buscar a «\(name)». Dile que puede activarla, o pídele el dato directamente.")
+        }
+        if contactsReadSetting == nil {
+            let access = await directory.access()
+            if !access.canRead {
+                return .noValue("Para buscar a «\(name)» necesito permiso para leer los contactos. Dile al usuario que lo active en Ajustes › Privacidad › «Permitir que Viernes lea mis contactos», o pídele el dato directamente.")
+            }
+        }
+        return await RecipientResolver.resolve(name, kind: kind, directory: directory, region: defaultRegion, digits: digits)
+    }
+
     private func findContact(name: String) async -> ToolOutcome {
-        let store = CNContactStore()
-        let before = CNContactStore.authorizationStatus(for: .contacts)
-        Diagnostics.shared.log("contactos: estado antes = \(before.rawValue)")
+        var access = await directory.access()
+        if access == .notDetermined { access = await directory.requestAccess() }
+        Diagnostics.shared.log("contactos: acceso = \(access)")
+        guard access.canRead else { return .failure(access.explanation) }
         do {
-            switch before {
-            case .denied, .restricted:
-                return .failure("Viernes no tiene permiso para leer tus contactos. Actívalo en Ajustes › Viernes › Contactos.")
-            case .notDetermined:
-                guard try await store.requestAccess(for: .contacts) else {
-                    return .failure("Viernes no tiene permiso para leer tus contactos. Actívalo en Ajustes › Viernes › Contactos.")
-                }
-            default:
-                break     // autorizado o acceso limitado (iOS 18): se lee lo que el usuario compartió
+            let ranked = ContactResolver.rank(name, in: try await directory.allContacts(), limit: 5)
+            guard !ranked.isEmpty else {
+                return .success("No encontré contactos que coincidan con «\(name)»." + (access == .limited ? " " + access.explanation : ""))
             }
-            let keys: [CNKeyDescriptor] = [CNContactGivenNameKey as CNKeyDescriptor, CNContactFamilyNameKey as CNKeyDescriptor,
-                                           CNContactEmailAddressesKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor,
-                                           CNContactNicknameKey as CNKeyDescriptor, CNContactOrganizationNameKey as CNKeyDescriptor]
-            var matches = try store.unifiedContacts(matching: CNContact.predicateForContacts(matchingName: name), keysToFetch: keys)
-            if matches.isEmpty {
-                // Sin coincidencia por nombre: se prueba con el apodo («Jefe») y la empresa, que muchos guardan en vez del nombre.
-                let wanted = TextNormalizer.tokens(name).map(TextNormalizer.stem)
-                if !wanted.isEmpty {
-                    let request = CNContactFetchRequest(keysToFetch: keys)
-                    var scanned: [CNContact] = []
-                    try store.enumerateContacts(with: request) { contact, _ in
-                        let fields = [contact.nickname, contact.organizationName].map(TextNormalizer.fold).filter { !$0.isEmpty }
-                        if fields.contains(where: { field in wanted.allSatisfy { field.contains($0) } }) { scanned.append(contact) }
-                    }
-                    matches = scanned
-                }
-            }
-            guard !matches.isEmpty else { return .success("No encontré contactos que coincidan con «\(name)».") }
-            let lines = matches.prefix(5).map { contact -> String in
-                let full = [contact.givenName, contact.familyName].filter { !$0.isEmpty }.joined(separator: " ")
-                let emails = contact.emailAddresses.map { String($0.value) }
-                let phones = contact.phoneNumbers.map { $0.value.stringValue }
-                var line = "• \(full.isEmpty ? "(sin nombre)" : full)"
-                if !emails.isEmpty { line += " — correo: \(emails.joined(separator: ", "))" }
-                if !phones.isEmpty { line += " — teléfono: \(phones.joined(separator: ", "))" }
+            let lines = ranked.map { match -> String in
+                let card = match.card
+                var line = "• \(card.displayName)" + (card.organization.isEmpty || card.organization == card.displayName ? "" : " (\(card.organization))")
+                let phones = ContactResolver.phoneOptions(for: card, region: defaultRegion).map { "\($0.label.isEmpty ? "teléfono" : $0.label) \(PhoneNumber.display($0.e164))" }
+                if !phones.isEmpty { line += " — " + phones.joined(separator: ", ") }
+                if !card.emails.isEmpty { line += " — correo: " + card.emails.joined(separator: ", ") }
                 return line
             }
-            let note = matches.count > 1 ? "\nHay \(matches.count) coincidencias: si no es claro cuál es, pregunta al usuario." : ""
+            let note = ranked.count > 1 ? "\nHay \(ranked.count) coincidencias: si no es claro cuál es, pregunta al usuario." : ""
             return .success("Contactos:\n" + lines.joined(separator: "\n") + note)
         } catch {
             Diagnostics.shared.log("contactos: error al leer: \(error.localizedDescription)")
@@ -602,6 +598,14 @@ final class DeviceToolExecutor: ToolExecutor {
     /// Muestra una VISTA PREVIA editable del borrador y espera a que el usuario decida (abrir en Correo, copiar o descartar).
     /// Lo que se cuenta al modelo es lo que de verdad pasó: nunca «enviado» si el usuario no pulsó Enviar.
     private func composeEmail(_ args: [String: String]) async -> ToolOutcome {
+        var args = args
+        if args["to"] == nil, let contact = args["contact"] {
+            let outcome = await resolveRecipient(contact, kind: .email, digits: nil)
+            guard case .resolved(_, let email, _) = outcome else {
+                return .failure((outcome.failureText ?? "No pude resolver el correo.") + " Si el usuario prefiere, prepara el borrador sin destinatario llamando de nuevo sin «contact».")
+            }
+            args["to"] = email
+        }
         let content = MailDraftContent(to: args["to"] ?? "", subject: args["subject"] ?? "", body: args["body"] ?? "")
         Diagnostics.shared.log("correo: vista previa del borrador (\(content.to.isEmpty ? "sin destinatario" : "con destinatario"), \(content.body.count) caracteres)")
         let result = await mailDrafts.present(content)
@@ -625,31 +629,57 @@ final class DeviceToolExecutor: ToolExecutor {
     }
 
     private func composeMessage(_ args: [String: String]) async -> ToolOutcome {
-        let body = urlEncode(args["body"] ?? "")
-        let number = args["to"].flatMap { ContactFormat.normalizedPhone($0) }
+        let text = args["body"] ?? ""
         let isWhatsApp = args["app"] == "whatsapp"
-        let urlString: String
-        if isWhatsApp {
-            let digits = (number ?? "").filter { $0.isNumber }
-            urlString = "whatsapp://send?" + (digits.isEmpty ? "" : "phone=\(digits)&") + "text=\(body)"
-        } else {
-            urlString = "sms:\(number.map { urlEncode($0, keep: "+") } ?? "")&body=\(body)"
-        }
-        guard let url = URL(string: urlString) else { return .failure("No pude construir el borrador.") }
-        let opened = await UIApplication.shared.open(url)
         let appName = isWhatsApp ? "WhatsApp" : "Mensajes"
-        return opened
-            ? .success("Abrí \(appName) con un borrador listo. TODAVÍA NO SE ENVIÓ: el usuario debe revisarlo y pulsar Enviar.")
-            : .failure("No pude abrir \(appName)" + (isWhatsApp ? "; puede que WhatsApp no esté instalada." : "."))
+        var number: String?
+        var person: String?
+        if let raw = args["to"] {
+            guard let e164 = PhoneNumber.e164(raw, region: defaultRegion) else {
+                return .failure("No pude interpretar «\(raw)» como un teléfono con código de país (región \(defaultRegion)). Pídele al usuario el número con prefijo, p. ej. +57 300 123 4567; no inventes uno.")
+            }
+            number = e164
+        } else if let contact = args["contact"] {
+            let outcome = await resolveRecipient(contact, kind: .phone, digits: args["digits"])
+            guard case .resolved(let name, let value, _) = outcome else { return .failure(outcome.failureText ?? "No pude resolver al destinatario.") }
+            number = value
+            person = name
+        }
+        Diagnostics.shared.log("mensaje: \(appName), destinatario \(person != nil ? "resuelto en contactos" : (number != nil ? "número dado" : "sin destinatario")), \(text.count) caracteres")
+
+        var opened = false
+        if isWhatsApp {
+            // Enlace documentado por WhatsApp (wa.me). `universalLinksOnly` hace que falle si no hay una app que lo abra, en vez de abrir una página web.
+            if let link = MessageLinks.whatsApp(e164: number, text: text) { opened = await UIApplication.shared.open(link, options: [.universalLinksOnly: true]) }
+            if !opened, let alternative = MessageLinks.whatsAppScheme(e164: number, text: text) { opened = await UIApplication.shared.open(alternative) }
+        } else if let link = MessageLinks.sms(e164: number, text: text) {
+            opened = await UIApplication.shared.open(link)
+        }
+        guard opened else {
+            return .failure("No pude abrir \(appName)" + (isWhatsApp ? "; puede que WhatsApp no esté instalada." : ".") + " No se envió nada.")
+        }
+        let target = person.map { "el chat de \($0)" } ?? (number != nil ? "el chat del número indicado" : "la lista para elegir contacto")
+        return .success("Abrí \(appName) con \(target) y el texto PRECARGADO. TODAVÍA NO SE ENVIÓ: el usuario debe pulsar Enviar en \(appName). Solo sé que iOS entregó el enlace a la app; no puedo comprobar que el chat se abrió ni si el usuario lo envió.")
     }
 
-    private func callPhone(_ number: String) async -> ToolOutcome {
-        guard let phone = ContactFormat.normalizedPhone(number), let url = URL(string: "tel:\(urlEncode(phone, keep: "+"))") else {
-            return .failure("Número no válido.")
+    private func callPhone(_ args: [String: String]) async -> ToolOutcome {
+        var number: String?
+        var person: String?
+        if let raw = args["number"] {
+            guard let e164 = PhoneNumber.e164(raw, region: defaultRegion) else {
+                return .failure("No pude interpretar «\(raw)» como un teléfono con código de país (región \(defaultRegion)). Pídele el número con prefijo; no inventes uno.")
+            }
+            number = e164
+        } else if let contact = args["contact"] {
+            let outcome = await resolveRecipient(contact, kind: .phone, digits: args["digits"])
+            guard case .resolved(let name, let value, _) = outcome else { return .failure(outcome.failureText ?? "No pude resolver a quién llamar.") }
+            number = value
+            person = name
         }
+        guard let phone = number, let url = MessageLinks.tel(e164: phone) else { return .failure("Número no válido.") }
         let opened = await UIApplication.shared.open(url)
         return opened
-            ? .success("Abrí el marcador con \(phone). iOS pedirá confirmar antes de llamar; todavía no se llamó.")
+            ? .success("Abrí el marcador con \(person ?? "el número indicado"). iOS pedirá confirmar antes de llamar; todavía no se llamó.")
             : .failure("No pude abrir el marcador (los iPhone sin telefonía y el simulador no pueden llamar).")
     }
 

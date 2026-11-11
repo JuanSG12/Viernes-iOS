@@ -710,10 +710,10 @@ public actor ConversationEngine {
         case "list_events": return "Eventos de \(a["date"] ?? "hoy")" + (a["days"].map { " (\($0) días)" } ?? "")
         case "find_contact": return "Buscar «\(a["name"] ?? "")»"
         case "compose_email":
-            return "Correo" + (a["to"].map { " para \($0)" } ?? "") + (a["subject"].map { " — \($0)" } ?? "") + ": «\(String((a["body"] ?? "").prefix(160)))»"
+            return "Correo" + ((a["to"] ?? a["contact"]).map { " para \($0)" } ?? "") + (a["subject"].map { " — \($0)" } ?? "") + ": «\(String((a["body"] ?? "").prefix(160)))»"
         case "compose_message":
-            return "\(a["app"] == "whatsapp" ? "WhatsApp" : "Mensaje")" + (a["to"].map { " para \($0)" } ?? "") + ": «\(String((a["body"] ?? "").prefix(160)))»"
-        case "call_phone": return "Llamar al \(a["number"] ?? "")"
+            return "\(a["app"] == "whatsapp" ? "WhatsApp" : "Mensaje")" + ((a["contact"] ?? a["to"]).map { " para \($0)" } ?? "") + ": «\(String((a["body"] ?? "").prefix(160)))»"
+        case "call_phone": return "Llamar a \(a["contact"] ?? a["number"] ?? "")"
         default: return call.name
         }
     }
