@@ -380,17 +380,19 @@ final class ViernesUITests: XCTestCase {
         XCTAssertTrue(preview.exists)
         XCTAssertTrue(preview.label.contains("Nada"), "Con los valores por defecto no se añade nada: «\(preview.label)»")
 
-        let name = app.textFields["personality-name"]
-        reveal(name, in: app)
-        typeText("Jarvis", into: name, in: app)
+        // Se usan selectores (no el teclado): en un runner lento el campo de texto a veces no recibe el foco.
+        let formality = app.segmentedControls["personality-formality"]
+        reveal(formality, in: app)
+        XCTAssertTrue(formality.exists, "Falta el selector de trato")
+        formality.buttons.element(boundBy: 1).tap()          // «Usted» es el segundo segmento
         let autonomy = app.segmentedControls["personality-autonomy"]
         reveal(autonomy, in: app)
         XCTAssertTrue(autonomy.exists, "Falta el selector de autonomía")
         autonomy.buttons.element(boundBy: 0).tap()          // «Prudente» es el primer segmento
 
         reveal(preview, in: app)
-        let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Jarvis"), object: preview)
-        XCTAssertEqual(XCTWaiter().wait(for: [updated], timeout: 10), .completed, "La vista previa refleja el nombre elegido: «\(preview.label)»")
+        let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "usted"), object: preview)
+        XCTAssertEqual(XCTWaiter().wait(for: [updated], timeout: 10), .completed, "La vista previa refleja el trato elegido: «\(preview.label)»")
         XCTAssertTrue(preview.label.contains("Prudencia"), "Y la autonomía elegida: «\(preview.label)»")
         XCTAssertTrue(preview.label.contains("honestidad"), "Y siempre la nota de que no cambia las reglas: «\(preview.label)»")
     }

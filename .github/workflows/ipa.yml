@@ -34,6 +34,15 @@ jobs:
       - name: Generar proyecto
         run: xcodegen generate
 
+      # Xcode 26 trae el compilador de Metal como componente aparte y algunas imágenes del runner no lo incluyen (MLX lo necesita).
+      - name: Asegurar el compilador de Metal
+        run: |
+          if ! xcrun -sdk iphoneos metal --version >/dev/null 2>&1; then
+            echo "Falta el compilador de Metal: se descarga."
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun -sdk iphoneos metal --version
+
       # Sin firma: el entitlement increased-memory-limit y el Team no existen para una cuenta gratuita;
       # Sideloadly firma después con el Apple ID del usuario.
       - name: Compilar para iPhone (Release, sin firma)

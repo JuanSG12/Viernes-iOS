@@ -106,6 +106,8 @@ final class AppModel: ObservableObject {
     let usage: UsageStore
     /// Historial de misiones del agente de este perfil (cifrado).
     let missionLog: MissionLog
+    /// Historial de investigaciones web de este perfil (cifrado).
+    let researchLog: ResearchLog
     @Published var missionStates: [MissionState] = []
     /// Métricas de los últimos turnos de voz (informe de rendimiento).
     let voiceMetrics = VoiceMetricsStore()
@@ -182,19 +184,24 @@ final class AppModel: ObservableObject {
         usage = usageStore
         let missions = MissionLog(vault: vault, path: layout.missionsPath)
         missionLog = missions
+        let research = ResearchLog(vault: vault, path: layout.researchPath)
+        researchLog = research
         let library = KnowledgeEngine(store: libraryStore, embedder: LibraryEmbedder.make())
         knowledge = library
         let executor = DeviceToolExecutor(claude: claude, mailDrafts: mailDrafts, ledger: EventLedger(defaults: defaults, key: layout.createdEventsKey))
         tools = executor
         executor.contactsReadSetting = loaded.contactsRead
         executor.defaultRegion = loaded.profileSettings.region
+        executor.researchLog = research
+        executor.webProvider = loaded.webSettings.provider
+        executor.webLanguage = loaded.profileSettings.responseLanguage
         conversation = ConversationEngine(engine: engine, memory: memory, executor: executor, confirmer: confirmation,
                                           config: ConversationConfig(memoryPolicy: loaded.memory, claudeMode: loaded.claude.mode,
                                                                      calendarReadEnabled: loaded.calendarReadEnabled,
                                                                      contactsReadEnabled: loaded.contactsReadEnabled,
                                                                      libraryEnabled: loaded.attachmentSettings.libraryOn,
                                                                      askBeforeCloudLibrary: loaded.attachmentSettings.askBeforeCloud,
-                                                                     profile: loaded.profileSettings),
+                                                                     profile: loaded.profileSettings, webResearchEnabled: Self.webEnabled(loaded)),
                                           knowledge: library, missions: missions)
         wireServices()
         speaker.pronunciation = loaded.profileSettings.personality.pronunciation
@@ -390,9 +397,17 @@ final class AppModel: ObservableObject {
             historyCharBudget: activeModel.isCloud ? 7_000 : (activeModel.isSystemModel ? 4_500 : 6_000),
             calendarReadEnabled: settings.calendarReadEnabled, contactsReadEnabled: settings.contactsReadEnabled,
             libraryEnabled: settings.attachmentSettings.libraryOn, askBeforeCloudLibrary: settings.attachmentSettings.askBeforeCloud,
-            profile: settings.profileSettings
+            profile: settings.profileSettings, webResearchEnabled: Self.webEnabled(settings)
         ))
     }
+
+    /// La investigación web solo se ofrece con el interruptor encendido Y la clave del buscador guardada en el Llavero del perfil.
+    static func webEnabled(_ settings: AppSettings) -> Bool {
+        settings.webSettings.enabled && CloudKeyStore.hasKey(providerID: settings.webSettings.provider.keyProviderID)
+    }
+
+    /// Tras guardar o borrar la clave del buscador: vuelve a decidir si las herramientas web se ofrecen.
+    func refreshWebResearch() { Task { await pushConversationConfig() } }
 
     // MARK: Ajustes
 
@@ -402,7 +417,8 @@ final class AppModel: ObservableObject {
         if settings.claude != old.claude { claude.config = settings.claude }
         if settings.contactsRead != old.contactsRead { tools.contactsReadSetting = settings.contactsRead }
         if settings.usage != old.usage { usage.settings = settings.usageSettings }
-        if settings.profile != old.profile { tools.defaultRegion = settings.profileSettings.region }
+        if settings.profile != old.profile { tools.defaultRegion = settings.profileSettings.region; tools.webLanguage = settings.profileSettings.responseLanguage }
+        if settings.web != old.web { tools.webProvider = settings.webSettings.provider; Task { await pushConversationConfig() } }
         if settings.cloudBrain != old.cloudBrain { refreshCloudEngine() }
         if settings.recognitionLocale != old.recognitionLocale {
             voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)
@@ -1105,6 +1121,7 @@ final class AppModel: ObservableObject {
             tools.clearLedger()
             usage.clear()
             await missionLog.deleteAll()
+            await researchLog.clear()
             missionStates = []
             CloudKeyStore.deleteAll()
             settingsStore.reset()

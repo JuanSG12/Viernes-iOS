@@ -516,6 +516,8 @@ public struct ProfileStorageLayout: Equatable, Sendable {
     public var usageHistoryPath: String { isLegacy ? "usage-history.bin" : dataDirectory + "/usage-history.bin" }
     /// Historial de misiones del agente (cifrado, solo de este perfil).
     public var missionsPath: String { isLegacy ? "missions.bin" : dataDirectory + "/missions.bin" }
+    /// Historial de investigaciones web (cifrado, solo de este perfil).
+    public var researchPath: String { isLegacy ? "research-history.bin" : dataDirectory + "/research-history.bin" }
 
     /// Todos los nombres de Llavero y UserDefaults de este perfil (para borrarlos o comprobar que no chocan con los de otro).
     public func secretAccounts(providerIDs: [String]) -> [String] {

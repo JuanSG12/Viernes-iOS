@@ -146,7 +146,7 @@ public struct KnowledgeChunk: Identifiable, Codable, Equatable, Sendable {
 
 /// Procedencia de lo que se le dio al modelo para responder (se muestra como «Fuentes consultadas»).
 public struct SourceRef: Identifiable, Codable, Equatable, Sendable {
-    public enum Origin: String, Codable, Sendable { case attachment, library }
+    public enum Origin: String, Codable, Sendable { case attachment, library, web }
     public var id: UUID
     public var documentName: String
     public var reference: String

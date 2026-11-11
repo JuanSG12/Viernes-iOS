@@ -45,6 +45,8 @@ public struct ConversationConfig: Sendable {
     public var profile: ProfileSettings
     /// Reconocer misiones conocidas («organiza mi día»): varios pasos planeados, con consultas en paralelo y resultados reales.
     public var missionsEnabled: Bool
+    /// Investigación web (búsqueda y lectura de páginas): apagada por defecto; la enciende el usuario eligiendo un buscador y su clave.
+    public var webResearchEnabled: Bool
 
     /// 4 rondas = hasta 3 rondas de herramientas encadenadas (consultar → actuar → …) y una respuesta final.
     public init(memoryPolicy: MemoryPolicy = .default, claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true,
@@ -52,7 +54,8 @@ public struct ConversationConfig: Sendable {
                 memoryContextLimit: Int = 5, timeZone: TimeZone = .current,
                 calendarReadEnabled: Bool = false, contactsReadEnabled: Bool = false,
                 libraryEnabled: Bool = true, askBeforeCloudLibrary: Bool = true, profile: ProfileSettings = .default,
-                missionsEnabled: Bool = true) {
+                missionsEnabled: Bool = true, webResearchEnabled: Bool = false) {
+        self.webResearchEnabled = webResearchEnabled
         self.missionsEnabled = missionsEnabled
         self.profile = profile.sanitized()
         self.libraryEnabled = libraryEnabled
@@ -530,6 +533,7 @@ public actor ConversationEngine {
             if tool.name == "find_contact" { return config.contactsReadEnabled && executor != nil }
             if ToolCatalog.memoryToolNames.contains(tool.name) { return config.memoryPolicy.enabled }
             if ToolCatalog.libraryToolNames.contains(tool.name) { return knowledge != nil && config.libraryEnabled }
+            if ToolCatalog.webToolNames.contains(tool.name) { return config.webResearchEnabled && executor != nil }
             return executor != nil
         }
     }
@@ -552,6 +556,7 @@ public actor ConversationEngine {
                 reason = "El usuario no ha activado la lectura del calendario (sin ella no puedo consultar ni modificar eventos). Dile que puede activarla en Configuración › Privacidad › «Permitir que Viernes lea mi calendario»."
             case "find_contact": reason = "El usuario no ha activado la lectura de contactos. Dile que puede activarla en Configuración › Privacidad › «Permitir que Viernes lea mis contactos»."
             case "ask_claude": reason = "La integración con Claude está desactivada. Dile que puede activarla en Configuración › Claude."
+            case "web_search", "read_page": reason = "La investigación web está apagada. Dile que puede activarla en Ajustes › Investigación web (hay que elegir un buscador y guardar su clave)."
             default: reason = "Esa herramienta no está disponible o está desactivada."
             }
             return ActionRecord(tool: validated.name, summary: validated.name, outcome: .failed(reason), date: clock(), showToUser: false)
@@ -607,6 +612,12 @@ public actor ConversationEngine {
         }
         switch outcome {
         case .success(let text):
+            if ToolCatalog.webToolNames.contains(validated.name) {
+                // Lo que vino de internet es contenido de terceros: mientras esté en la conversación, las acciones que no son
+                // consultas exigen confirmación, y sus fuentes se muestran en «Fuentes consultadas».
+                run.tainted = true
+                for source in WebResultsFormat.sources(from: text) { run.add(SourceRef(documentName: source.title.isEmpty ? source.url : source.title, reference: source.url, origin: .web)) }
+            }
             return ActionRecord(tool: validated.name, summary: summary, outcome: .executed(text), date: clock())
         case .card(let text, let card):
             return ActionRecord(tool: validated.name, summary: summary, outcome: .executed(text), date: clock(), card: card)
@@ -778,6 +789,8 @@ public actor ConversationEngine {
         case "save_memory": return a["text"] ?? ""
         case "forget_memory", "search_memory": return a["query"] ?? ""
         case "search_library": return "Buscar «\(a["query"] ?? "")» en la biblioteca"
+        case "web_search": return "Buscar en internet: «\(a["query"] ?? "")»"
+        case "read_page": return "Leer la página \(a["url"] ?? "")"
         case "device_info": return "Consultar \(a["what"] ?? "all")"
         case "list_reminders": return "Listar recordatorios"
         case "get_weather": return "Clima en \(a["city"] ?? "")"

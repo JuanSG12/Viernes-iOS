@@ -68,6 +68,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var profile: ProfileSettings?
     /// Consumo: presupuesto mensual, proveedores autorizados/de pago y tarifas. Opcional por la misma razón que `cloud`.
     public var usage: UsageSettings?
+    /// Investigación web (búsqueda y lectura de páginas): apagada por defecto. Opcional por la misma razón que `cloud`.
+    public var web: WebResearchSettings?
 
     public var calendarReadEnabled: Bool { calendarRead ?? false }
     public var contactsReadEnabled: Bool { contactsRead ?? false }

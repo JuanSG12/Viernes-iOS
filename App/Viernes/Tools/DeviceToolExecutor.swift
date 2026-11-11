@@ -62,6 +62,8 @@ final class DeviceToolExecutor: ToolExecutor {
         case "get_weather": return await weather(city: call.args["city"] ?? "")
         case "list_events": return await listEvents(date: call.args["date"] ?? "today", days: Int(call.args["days"] ?? "") ?? 1)
         case "find_contact": return await findContact(name: call.args["name"] ?? "")
+        case "web_search": return await webSearch(call.args)
+        case "read_page": return await webReadPage(call.args)
         case "compose_email": return await composeEmail(call.args)
         case "compose_message": return await composeMessage(call.args)
         case "call_phone": return await callPhone(call.args)
@@ -546,6 +548,29 @@ final class DeviceToolExecutor: ToolExecutor {
     /// Región del perfil: da el código de país a los números locales.
     var defaultRegion = "CO"
     var directory: ContactDirectory = SystemContactDirectory()
+
+    // MARK: Investigación web (opcional; la enciende el usuario con un buscador y su clave)
+
+    /// Buscador elegido en Ajustes › Investigación web.
+    var webProvider: WebSearchProvider = .brave
+    var researchLog: ResearchLog?
+    /// Idioma de las búsquedas (el de respuesta del perfil).
+    var webLanguage: String?
+
+    private func webSearch(_ args: [String: String]) async -> ToolOutcome {
+        let query = args["query"] ?? ""
+        let count = Int(args["count"] ?? "") ?? 5
+        Diagnostics.shared.log("web: búsqueda en \(webProvider.displayName) (\(query.count) caracteres)")
+        let found = await WebResearchClient.search(provider: webProvider, query: query, count: count, language: webLanguage)
+        if !found.results.isEmpty { await researchLog?.record(query: query, results: found.results) }
+        return found.outcome
+    }
+
+    private func webReadPage(_ args: [String: String]) async -> ToolOutcome {
+        let read = await WebResearchClient.readPage(urlString: args["url"] ?? "")
+        if case .success = read.outcome { await researchLog?.noteRead(title: read.title, url: read.url) }
+        return read.outcome
+    }
 
     /// Punto único para resolver a una persona: lo usan WhatsApp, SMS, llamadas y correo. Los resultados que vuelven al modelo no llevan números completos.
     private func resolveRecipient(_ name: String, kind: RecipientKind, digits: String?) async -> RecipientOutcome {

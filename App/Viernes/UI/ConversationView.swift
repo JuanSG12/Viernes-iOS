@@ -23,6 +23,8 @@ enum ToolPhrases {
         case "ask_claude": return "Preguntando a Claude…"
         case "save_memory", "search_memory", "forget_memory": return "Consultando tu memoria…"
         case "device_info": return "Consultando el dispositivo…"
+        case "web_search": return "Buscando en internet…"
+        case "read_page": return "Leyendo la página…"
         default: return "Ejecutando una acción…"
         }
     }
@@ -41,6 +43,8 @@ enum ToolPhrases {
         case "ask_claude": return "sparkles"
         case "save_memory", "search_memory", "forget_memory": return "brain"
         case "device_info": return "iphone"
+        case "web_search": return "globe"
+        case "read_page": return "doc.richtext"
         default: return "gearshape"
         }
     }
@@ -205,7 +209,7 @@ struct SourcesRow: View {
             Text("FUENTES CONSULTADAS").font(Theme.mono(9)).tracking(1.6).foregroundStyle(Theme.textSecondary.opacity(0.8))
             ForEach(sources) { source in
                 HStack(spacing: 6) {
-                    Image(systemName: source.origin == .library ? "books.vertical" : "paperclip")
+                    Image(systemName: source.origin == .library ? "books.vertical" : (source.origin == .web ? "globe" : "paperclip"))
                         .font(.system(size: 10)).foregroundStyle(Theme.silver)
                     Text(source.label).font(Theme.mono(11)).foregroundStyle(Theme.textPrimary).lineLimit(2)
                 }

@@ -229,6 +229,20 @@ public enum ToolValidator {
             }
         case "find_contact":
             guard args["name"]!.count <= 100 else { throw fail("el nombre es demasiado largo.") }
+        case "web_search":
+            let query = args["query"]!
+            guard query.count <= WebSearchProtocol.maxQueryLength else { throw fail("la consulta es demasiado larga.") }
+            if SensitiveDataRedactor.scan(query).isSensitive {
+                throw fail("la consulta parece contener un dato sensible (tarjeta, clave…) y no se envía a un buscador. Reformúlala sin ese dato.")
+            }
+            if let count = args["count"] {
+                guard let value = Int(count), (1...8).contains(value) else { throw fail("«count» debe estar entre 1 y 8.") }
+            }
+        case "read_page":
+            guard let url = WebURLPolicy.validate(args["url"]!) else {
+                throw fail("solo se pueden leer enlaces https públicos (sin direcciones IP, redes locales ni credenciales).")
+            }
+            args["url"] = url.absoluteString
         case "update_event", "delete_event":
             try validateEventTarget(&args, tool: call.name, timeZone: timeZone)
             if call.name == "update_event" { try validateEventChanges(&args, tool: call.name, timeZone: timeZone) }

@@ -30,6 +30,9 @@ struct SettingsView: View {
                 NavigationLink { UsageView() } label: {
                     row(icon: "chart.bar", title: "Consumo y presupuesto", detail: "Tokens, costo estimado, límite mensual, proveedores autorizados", status: nil)
                 }.accessibilityIdentifier("settings-usage")
+                NavigationLink { WebResearchView() } label: {
+                    row(icon: "globe", title: "Investigación web", detail: model.settings.webSettings.enabled ? "Activa · \(model.settings.webSettings.provider.displayName)" : "Apagada (opcional; necesita la clave de un buscador)", status: nil)
+                }.accessibilityIdentifier("settings-web")
                 NavigationLink { MissionsView() } label: {
                     row(icon: "checklist", title: "Misiones del agente", detail: "Tareas de varios pasos, con resultados reales", status: nil)
                 }.accessibilityIdentifier("settings-missions")
