@@ -687,6 +687,7 @@ final class AppModel: ObservableObject {
     }
 
     private func speechFinished() {
+        if voiceBenchRunning { return }          // el banco de medición dice frases de prueba: no debe disparar la conversación manos libres
         if generationTask != nil { if coreState == .speaking { coreState = .thinking }; return }
         finishTurn()
     }
@@ -1107,6 +1108,69 @@ final class AppModel: ObservableObject {
             await reloadHistory()
             showBanner("Todos los datos locales de Viernes fueron eliminados.")
         }
+    }
+
+    // MARK: Banco de medición de voz
+
+    @Published var voiceBenchRuns: [VoiceBenchRun] = []
+    @Published var voiceBenchStatus: String?
+    @Published private(set) var voiceBenchRunning = false
+    private var voiceBenchTask: Task<Void, Never>?
+
+    /// Dice las mismas frases fijas por cada modo elegido y anota los tiempos reales de ESTE iPhone. Los modos en la nube gastan
+    /// caracteres del plan de ElevenLabs. No toca la conversación ni la memoria.
+    func startVoiceBench(_ backends: [VoiceBenchBackend]) {
+        guard !voiceBenchRunning, !backends.isEmpty else { return }
+        voiceBenchRunning = true
+        voiceBenchRuns = []
+        voiceBenchStatus = "Preparando…"
+        stopEverything()
+        let base = settings.voice
+        voiceBenchTask = Task { await self.runVoiceBench(backends, base: base) }
+    }
+
+    func cancelVoiceBench() {
+        voiceBenchTask?.cancel()
+        speaker.stop()
+    }
+
+    private func runVoiceBench(_ backends: [VoiceBenchBackend], base: VoiceSettings) async {
+        defer {
+            speaker.stop()
+            speaker.apply(settings.voice)
+            voiceBenchRunning = false
+            coreState = .idle
+        }
+        let phrases = VoiceBenchPhrases.all
+        for backend in backends {
+            guard let voice = backend.settings(base: base) else {
+                voiceBenchStatus = "«\(backend.label)» no está disponible: falta elegir una voz o guardar la clave de ElevenLabs."
+                continue
+            }
+            speaker.apply(voice)
+            for (index, phrase) in phrases.enumerated() {
+                if Task.isCancelled { voiceBenchStatus = "Medición cancelada."; return }
+                voiceBenchStatus = "\(backend.label): frase \(index + 1) de \(phrases.count)…"
+                let before = voiceMetrics.turns.count
+                let memoryBefore = ResidentMemory.megabytes()
+                speaker.enqueue(phrase)
+                var waited = 0
+                while voiceMetrics.turns.count == before, waited < 1_200, !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    waited += 1
+                }
+                guard voiceMetrics.turns.count > before, let metrics = voiceMetrics.turns.last else {
+                    speaker.stop()
+                    voiceBenchStatus = "\(backend.label): la frase \(index + 1) no terminó en 120 s y se omitió."
+                    continue
+                }
+                let memoryAfter = ResidentMemory.megabytes()
+                let delta = (memoryBefore != nil && memoryAfter != nil) ? memoryAfter! - memoryBefore! : nil
+                voiceBenchRuns.append(VoiceBenchRun(backend: metrics.backend, phraseIndex: index, metrics: metrics, memoryDeltaMB: delta))
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+        }
+        voiceBenchStatus = voiceBenchRuns.isEmpty ? "No se pudo medir nada." : "Medición terminada: \(voiceBenchRuns.count) frases."
     }
 
     // MARK: Perfil

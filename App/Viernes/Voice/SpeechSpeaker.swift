@@ -54,6 +54,8 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         var fellBack = false
         var reconnects = 0
         var speakingStarted = false
+        /// Fin de la última frase del sintetizador del sistema (para medir el silencio hasta la siguiente).
+        var lastUtteranceEndAt: Double?
         var heldSystem: [SpeechChunk] = []
         init(id: UInt64, mode: Mode, cloud: ElevenLabsSettings?, speed: Double, recorder: VoiceTurnRecorder) {
             self.id = id
@@ -566,6 +568,10 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         Task { @MainActor in
             guard self.live.contains(id) else { return }
             if let current = self.turn {
+                if let last = current.lastUtteranceEndAt {
+                    current.recorder.segmentSilence(ms: (self.uptime - last) * 1_000)
+                    current.lastUtteranceEndAt = nil
+                }
                 current.recorder.firstAudio(at: self.uptime)
                 self.markSpeaking(current)
             } else if !self.isSpeaking {
@@ -591,6 +597,9 @@ final class SpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     private func utteranceEnded(_ id: ObjectIdentifier) {
         guard live.remove(id) != nil else { return }      // ya descartada por stop(): no cuenta
-        if let current = turn { completeIfDone(current) }
+        if let current = turn {
+            current.lastUtteranceEndAt = uptime
+            completeIfDone(current)
+        }
     }
 }

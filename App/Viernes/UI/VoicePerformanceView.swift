@@ -18,6 +18,14 @@ struct VoicePerformanceView: View {
     var body: some View {
         List {
             Section {
+                NavigationLink("Banco de medición…") { VoiceBenchView() }
+                    .accessibilityIdentifier("voice-bench-link")
+            } footer: {
+                Text("Compara los modos de voz con las mismas frases y anota los tiempos reales de este iPhone.")
+            }
+            .listRowBackground(Theme.carbon.opacity(0.5))
+
+            Section {
                 Text(metrics.report)
                     .font(Theme.mono(11)).foregroundStyle(Theme.textPrimary)
                     .textSelection(.enabled)

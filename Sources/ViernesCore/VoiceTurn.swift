@@ -200,6 +200,9 @@ public struct VoiceTurnMetrics: Codable, Equatable, Identifiable, Sendable {
     public var audioBytes = 0
     /// Silencios inesperados entre audio y audio (el colchón se vació antes de que llegara más).
     public var gapsMs: [Double] = []
+    /// Tiempo entre el fin de una frase y el inicio de la siguiente, según el sintetizador del sistema (incluye las pausas configuradas).
+    /// `nil` = ese modo no lo mide (el tiempo real mide los cortes en `gapsMs`). Opcional para no invalidar métricas guardadas antes.
+    public var silencesBetweenSegmentsMs: [Double]?
     public var discardedSegments = 0
     public var connectionErrors = 0
     public var reconnects = 0
@@ -257,6 +260,10 @@ public struct VoiceTurnRecorder: Sendable {
     }
 
     public mutating func gap(ms value: Double) { if value > 0 { metrics.gapsMs.append(value) } }
+    public mutating func segmentSilence(ms value: Double) {
+        guard value >= 0 else { return }
+        metrics.silencesBetweenSegmentsMs = (metrics.silencesBetweenSegmentsMs ?? []) + [value]
+    }
     public mutating func discarded() { metrics.discardedSegments += 1 }
     public mutating func connectionError() { metrics.connectionErrors += 1 }
     public mutating func reconnected() { metrics.reconnects += 1 }
@@ -308,6 +315,13 @@ public enum VoiceMetricsReport {
             lines.append("  del token al primer fragmento: mediana \(format(percentile(column(\.firstSegmentMs), 0.5)))")
             let gaps = group.flatMap(\.gapsMs)
             lines.append("  cortes inesperados: \(gaps.count) en total (mayor \(format(gaps.max())), suma \(format(gaps.isEmpty ? nil : gaps.reduce(0, +))))")
+            lines.append("  tiempo total de la respuesta: mediana \(format(percentile(column(\.endedAtMs), 0.5)))  ·  p95 \(format(percentile(column(\.endedAtMs), 0.95)))")
+            let silences = group.compactMap(\.silencesBetweenSegmentsMs).flatMap { $0 }
+            if group.contains(where: { $0.silencesBetweenSegmentsMs != nil }) {
+                lines.append("  silencios entre frases (sintetizador del sistema): \(silences.count) · mediana \(format(percentile(silences, 0.5))) · mayor \(format(silences.max()))")
+            }
+            let audioBytes = group.reduce(0) { $0 + $1.audioBytes }
+            if audioBytes > 0 { lines.append("  audio recibido: \(audioBytes / 1_024) KB") }
             lines.append("  interrupciones: \(group.filter { $0.interruptedAtMs != nil }.count)  ·  hasta el silencio: mediana \(format(percentile(column(\.silenceAfterInterruptMs), 0.5)))")
             lines.append("  fragmentos descartados: \(group.reduce(0) { $0 + $1.discardedSegments })  ·  errores de conexión: \(group.reduce(0) { $0 + $1.connectionErrors })  ·  reconexiones: \(group.reduce(0) { $0 + $1.reconnects })  ·  respaldos a voz del sistema: \(group.filter(\.fellBackToSystemVoice).count)")
             lines.append("  audio reproducido: \(format(group.reduce(0) { $0 + $1.playbackMs }))  ·  caracteres enviados: \(group.reduce(0) { $0 + $1.charactersSent })")
