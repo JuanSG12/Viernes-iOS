@@ -4,6 +4,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 
 ## [0.8.0-dev] — Evolución (en curso; ver AUDIT_0_8.md)
 
+- Estado (2026-11-11): fases A–I completas; CI verde en 4b0fc1a (estáticas + Companion Node, core, no-mlx, full) e IPA compilado. Sin probar en iPhone real.
+
 **Fase C — Contactos y WhatsApp** (CI verde en 576531c): resolutor central de contactos (búsqueda aproximada, apodos, empresa, móvil preferido, desambiguación), número en formato internacional con el código de país de la región del perfil, enlaces `wa.me` documentados por WhatsApp, y `compose_message`/`call_phone`/`compose_email` por nombre. Nunca se afirma que se envió.
 
 **Fase B — Multi-Brain, consumo y presupuesto** (CI verde en ffa8b69): presets de OpenAI y Cerebras (API compatible con OpenAI; Groq sigue disponible y es opcional); registro de consumo por perfil (cifrado) con los tokens reales del proveedor o una estimación marcada; tarifas que escribe el usuario (la app no trae precios propios); presupuesto mensual (5, 10, 20 o el monto que quieras) que detiene las solicitudes a proveedores de pago y explica el motivo, con alerta al 80 %; proveedores autorizados; lo que cada proveedor informe de sus límites (`x-ratelimit-*`), y nada más. Nunca cambia de proveedor por su cuenta. Sin probar en el iPhone ni con claves reales de OpenAI/Cerebras.
