@@ -33,6 +33,9 @@ struct SettingsView: View {
                 NavigationLink { WebResearchView() } label: {
                     row(icon: "globe", title: "Investigación web", detail: model.settings.webSettings.enabled ? "Activa · \(model.settings.webSettings.provider.displayName)" : "Apagada (opcional; necesita la clave de un buscador)", status: nil)
                 }.accessibilityIdentifier("settings-web")
+                NavigationLink { CompanionView() } label: {
+                    row(icon: "desktopcomputer", title: "Windows Companion", detail: model.settings.companionSettings.map { "Emparejado con \($0.host)" } ?? "Opcional: tu PC en tu red local (prueba de concepto)", status: nil)
+                }.accessibilityIdentifier("settings-companion")
                 NavigationLink { MissionsView() } label: {
                     row(icon: "checklist", title: "Misiones del agente", detail: "Tareas de varios pasos, con resultados reales", status: nil)
                 }.accessibilityIdentifier("settings-missions")

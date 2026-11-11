@@ -53,5 +53,5 @@ enum CloudKeyStore {
         for providerID in providerIDs { try? KeychainStore().delete(account: layout.apiKeyAccount(providerID: providerID)) }
     }
 
-    static var providerIDs: [String] { CloudProviders.all.map(\.id) + [ElevenLabsProtocol.keyProviderID] + WebSearchProvider.allCases.map(\.keyProviderID) }
+    static var providerIDs: [String] { CloudProviders.all.map(\.id) + [ElevenLabsProtocol.keyProviderID] + WebSearchProvider.allCases.map(\.keyProviderID) + ["companion"] }
 }

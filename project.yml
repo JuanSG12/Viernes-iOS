@@ -84,6 +84,8 @@ targets:
           Para proteger la pantalla de Memoria con Face ID si activas esa opción.
         NSCameraUsageDescription: >-
           Solo cuando tú eliges «Tomar una foto» o «Escanear documento» al adjuntar algo a un mensaje. La foto o el escaneo se leen en el teléfono y solo salen de él si lo autorizas al enviarlos a un cerebro en la nube.
+        NSLocalNetworkUsageDescription: >-
+          Solo si tú emparejas el Windows Companion: Viernes se conecta con tu PC en tu red local (con código de emparejamiento y la huella de su certificado). No busca ni se conecta a otros dispositivos.
         CFBundleURLTypes:
           - CFBundleURLName: com.example.viernes.link
             CFBundleURLSchemes:

@@ -40,6 +40,10 @@ jobs:
           ./scripts/test-static-check.ps1
           ./scripts/static-check.ps1
 
+      # El compañero de Windows es código Node sin dependencias: sus pruebas corren aquí (necesitan openssl para el certificado de prueba).
+      - name: Pruebas del Windows Companion (Node)
+        run: node --test companion/windows/test/companion.test.js
+
   core:
     name: Core (swift test)
     runs-on: ${{ inputs.runner || 'macos-26' }}

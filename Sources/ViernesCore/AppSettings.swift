@@ -70,6 +70,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var usage: UsageSettings?
     /// Investigación web (búsqueda y lectura de páginas): apagada por defecto. Opcional por la misma razón que `cloud`.
     public var web: WebResearchSettings?
+    /// Compañero de Windows (opcional): dónde está y la huella de su certificado. El token va en el Llavero.
+    public var companion: CompanionSettings?
 
     public var calendarReadEnabled: Bool { calendarRead ?? false }
     public var contactsReadEnabled: Bool { contactsRead ?? false }
@@ -114,6 +116,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         copy.attachments = attachments?.sanitized()
         copy.profile = profile?.sanitized()
         copy.usage = usage?.sanitized()
+        if let companion = companion,
+           !(CompanionAddress.validate(host: companion.host, port: companion.port) && CompanionFingerprint.normalize(companion.fingerprint) != nil) {
+            copy.companion = nil     // un dato inválido (o una dirección que no es de la red local) no se conserva
+        }
         if claude.shortcutName.trimmingCharacters(in: .whitespaces).isEmpty { copy.claude.shortcutName = ClaudeBridgeConfig().shortcutName }
         return copy
     }
