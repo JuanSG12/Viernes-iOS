@@ -72,7 +72,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var web: WebResearchSettings?
     /// Compañero de Windows (opcional): dónde está y la huella de su certificado. El token va en el Llavero.
     public var companion: CompanionSettings?
+    /// Enrutador de inteligencia (qué proveedor y modelo para cada tipo de petición). Apagado por defecto: sin él se usa el cerebro elegido.
+    public var routing: RoutingSettings?
+    /// Ahorro de tokens con cerebros en la nube. `nil` = encendido.
+    public var tokenSaver: Bool?
 
+    public var routingSettings: RoutingSettings { routing ?? .default }
+    public var tokenSaverEnabled: Bool { tokenSaver ?? true }
     public var calendarReadEnabled: Bool { calendarRead ?? false }
     public var contactsReadEnabled: Bool { contactsRead ?? false }
     public var speechSettings: SpeechSettings { speech ?? .default }
@@ -116,6 +122,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         copy.attachments = attachments?.sanitized()
         copy.profile = profile?.sanitized()
         copy.usage = usage?.sanitized()
+        copy.routing = routing?.sanitized()
         if let companion = companion,
            !(CompanionAddress.validate(host: companion.host, port: companion.port) && CompanionFingerprint.normalize(companion.fingerprint) != nil) {
             copy.companion = nil     // un dato inválido (o una dirección que no es de la red local) no se conserva

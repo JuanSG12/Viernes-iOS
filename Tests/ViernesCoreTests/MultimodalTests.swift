@@ -861,9 +861,9 @@ final class AttachmentConversationTests: XCTestCase {
     }
 
     func testFollowUpsSeeTheDocumentOnlyWhenTheyAreAboutIt() async {
-        let (engine, scripted) = makeEngine(script: [["Vigencia: 12 meses."], ["Son las 5."], ["Confidencial."]])
+        let (engine, scripted) = makeEngine(script: [["Vigencia: 12 meses."], ["París."], ["Confidencial."]])
         _ = await collect(await engine.send("Resume este contrato", attachments: bundle(text: "Contrato. Vigencia de 12 meses. Cláusula de confidencialidad estricta.", name: "contrato.txt")))
-        _ = await collect(await engine.send("¿Qué hora es?"))
+        _ = await collect(await engine.send("¿Cuál es la capital de Francia?"))   // (la hora y la fecha ya las responde el código sin modelo)
         _ = await collect(await engine.send("¿Qué decía sobre la confidencialidad?"))
         XCTAssertFalse(scripted.requests[1].turns.last?.content.contains("confidencialidad") ?? true, "Una pregunta ajena no arrastra el archivo")
         XCTAssertFalse(scripted.requests[1].system.contains("CONTENIDO NO CONFIABLE"))

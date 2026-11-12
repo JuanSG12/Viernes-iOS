@@ -264,3 +264,56 @@ public struct ProviderLimitsSnapshot: Codable, Equatable, Sendable {
                                       resetRequests: value("x-ratelimit-reset-requests"), resetTokens: value("x-ratelimit-reset-tokens"))
     }
 }
+
+// MARK: Consumo por modelo y por día
+
+/// Consumo de un modelo concreto de un proveedor en un periodo. Distingue lo que MIDIÓ el proveedor de lo que Viernes estimó por el texto.
+public struct ModelUsageSummary: Equatable, Sendable {
+    public var providerID: String
+    public var model: String
+    public var requests: Int
+    public var input: Int
+    public var output: Int
+    public var costUSD: Double
+    public var missingPrice: Bool
+    /// Peticiones cuyos tokens son una estimación local (el proveedor no los informó).
+    public var estimatedRequests: Int
+
+    public var total: Int { input + output }
+    public var measuredRequests: Int { requests - estimatedRequests }
+}
+
+extension UsageSummary {
+    /// Consumo por proveedor y modelo desde `start` (incluido), ordenado por peticiones.
+    public static func byModel(records: [UsageRecord], since start: Date) -> [ModelUsageSummary] {
+        var rows: [String: ModelUsageSummary] = [:]
+        for record in records where record.date >= start {
+            let key: String = record.providerID + "|" + record.model
+            var item: ModelUsageSummary = rows[key] ?? ModelUsageSummary(providerID: record.providerID, model: record.model, requests: 0, input: 0,
+                                                                         output: 0, costUSD: 0, missingPrice: false, estimatedRequests: 0)
+            item.requests += 1
+            item.input += record.input
+            item.output += record.output
+            if let cost = record.costUSD { item.costUSD += cost } else { item.missingPrice = true }
+            if record.isEstimate { item.estimatedRequests += 1 }
+            rows[key] = item
+        }
+        return rows.values.sorted { lhs, rhs in
+            if lhs.requests != rhs.requests { return lhs.requests > rhs.requests }
+            if lhs.providerID != rhs.providerID { return lhs.providerID < rhs.providerID }
+            return lhs.model < rhs.model
+        }
+    }
+
+    public static func today(records: [UsageRecord], now: Date, calendar: Calendar = .current) -> [ModelUsageSummary] {
+        byModel(records: records, since: calendar.startOfDay(for: now))
+    }
+
+    public static func thisMonth(records: [UsageRecord], now: Date, calendar: Calendar = .current) -> [ModelUsageSummary] {
+        byModel(records: records, since: UsageGate.monthStart(now, calendar: calendar))
+    }
+
+    public static func totals(_ rows: [ModelUsageSummary]) -> (requests: Int, input: Int, output: Int) {
+        rows.reduce((0, 0, 0)) { ($0.0 + $1.requests, $0.1 + $1.input, $0.2 + $1.output) }
+    }
+}

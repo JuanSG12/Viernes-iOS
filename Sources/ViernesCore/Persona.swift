@@ -10,10 +10,17 @@ public struct PersonaContext: Sendable {
     public var spokenOutput: Bool
     /// Perfil activo (nombre, personalidad, idioma…). `nil` o por defecto = el prompt de siempre, sin ninguna sección añadida.
     public var profile: ProfileSettings?
+    /// Herramientas que se listan SOLO con nombre y argumentos (modo ahorro de tokens). Vacío = comportamiento de siempre.
+    public var compactTools: [ToolDefinition]
+    /// Temas de la petición (modo ahorro de tokens): limita las guías largas a lo relevante. `nil` = todas, como siempre.
+    public var focus: Set<ToolGroup>?
 
     public init(now: Date = Date(), timeZone: TimeZone = .current, engine: ModelDescriptor,
                 memories: [MemoryItem] = [], tools: [ToolDefinition] = ToolCatalog.all,
-                claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true, profile: ProfileSettings? = nil) {
+                claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true, profile: ProfileSettings? = nil,
+                compactTools: [ToolDefinition] = [], focus: Set<ToolGroup>? = nil) {
+        self.compactTools = compactTools
+        self.focus = focus
         self.profile = profile
         self.now = now
         self.timeZone = timeZone
@@ -96,7 +103,11 @@ public enum Persona {
         - No puedes controlar apps arbitrarias, leer la pantalla, ni escuchar con la app cerrada. No finjas poder hacerlo.
         """)
 
-        if !context.tools.isEmpty {
+        // Con `focus` (modo ahorro de tokens, solo nube) el detalle largo se limita a las herramientas y guías del tema de la
+        // petición; el resto va como lista corta (nombre y argumentos). Sin `focus` el prompt es el de siempre.
+        let focus: Set<ToolGroup>? = context.focus
+        func relevant(_ group: ToolGroup) -> Bool { focus?.contains(group) ?? true }
+        if !context.tools.isEmpty || !context.compactTools.isEmpty {
             var lines: [String] = []
             for tool in context.tools {
                 let params = tool.parameters.map { "\($0.name)\($0.required ? "" : "?"): \($0.description)" }.joined(separator: "; ")
@@ -104,9 +115,17 @@ public enum Persona {
                 let confirm = autonomy.requiresConfirmation(tool.risk) ? " [la app pide confirmación al usuario]" : ""
                 lines.append("- \(tool.name)(\(params)): \(tool.summary)\(confirm)")
             }
+            var compactBlock = ""
+            if !context.compactTools.isEmpty {
+                let short: [String] = context.compactTools.map { tool in
+                    let args: String = tool.parameters.map { "\($0.name)\($0.required ? "" : "?")" }.joined(separator: ", ")
+                    return "\(tool.name)(\(args))"
+                }
+                compactBlock = "\nOtras herramientas reales (nombre y argumentos): " + short.joined(separator: "; ")
+            }
             sections.append("""
             Herramientas reales que puedes usar (solo estas):
-            \(lines.joined(separator: "\n"))
+            \(lines.joined(separator: "\n"))\(compactBlock)
 
             Para usar una, escribe en una línea aparte, exactamente: \
             \(toolOpen){"name":"nombre_herramienta","args":{"clave":"valor"}}\(toolClose)
@@ -121,7 +140,8 @@ public enum Persona {
             Este es el ÚNICO formato de llamada válido: nunca escribas JSON suelto, «functions.», «<function=…>» ni otra sintaxis; \
             sin las etiquetas \(toolOpen)…\(toolClose) la acción no se ejecuta. Nunca digas que consultaste, creaste o agendaste algo \
             si no llamaste a la herramienta y recibiste su resultado. No inventes herramientas.
-
+            """)
+            if relevant(.calendar) || relevant(.reminders) { sections.append("""
             Calendario: para CAMBIAR o QUITAR un evento que ya existe usa update_event o delete_event (nunca create_event, nunca digas \
             que no puedes). Pásales lo que sepas del evento: title, date, time (hora actual de inicio en 24 h) o just_created=true \
             si el usuario habla del que acabas de crear. Si ya sabes el día (p. ej. «la reunión de mañana»), pásalo en date. Para \
@@ -129,7 +149,8 @@ public enum Persona {
             Si el resultado dice que varios coinciden, NO elijas: pregunta cuál (con la hora o el título) y llama de nuevo con el \
             event_id exacto que te dio. Si no existe ninguno, dilo. Si borra, la app muestra el evento exacto y pide confirmación: \
             no preguntes antes. Cuenta el resultado real (qué quedó cambiado o eliminado), nunca lo que supones.
-
+            """) }
+            if relevant(.messaging) { sections.append("""
             Correo: cuando pidan redactar o preparar un correo, escribe tú un asunto breve y un cuerpo completo (saludo, mensaje y \
             despedida, en el tono del usuario) y llama a compose_email. Destinatario: si dan una dirección, úsala; si nombran a \
             alguien («mi jefe», «Ana»), mira primero tus recuerdos y, si puedes, busca con find_contact; si no hay dirección, prepara \
@@ -142,13 +163,14 @@ public enum Persona {
             al usuario: solo si el resultado dice que no encontró a la persona, que hay varios (pregúntale cuál) o que falta el permiso. \
             «to»/«number» solo si el usuario dictó un número. El mensaje queda PRECARGADO: el usuario debe pulsar Enviar; nunca digas que \
             lo enviaste ni que la llamada se hizo.
-
+            """) }
+            sections.append("""
             Peticiones de varios pasos: encadena herramientas. Primero consulta lo necesario y, con los datos REALES del \
             resultado, actúa (p. ej. leer eventos y luego crear un recordatorio). Si dos consultas son independientes, \
             pídelas juntas en la misma respuesta, una etiqueta por línea. Nunca inventes un dato que una herramienta debía \
             darte; si falla o no hay permiso, dilo tal cual.
             """)
-            let names = Set(context.tools.map(\.name))
+            let names = Set((context.tools + context.compactTools).map(\.name))
             // Lo que el usuario apagó en su perfil no se confunde con un permiso de iOS apagado.
             let profileOff = Set(context.profile?.disabledTools ?? [])
             var missing: [String] = []

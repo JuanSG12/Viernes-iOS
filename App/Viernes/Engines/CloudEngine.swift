@@ -1,7 +1,8 @@
 import Foundation
 import ViernesCore
 
-/// Cerebro en la nube: API de chat compatible con OpenAI (Groq, Gemini…) con la clave gratuita del usuario.
+/// Cerebro en la nube: API de chat compatible con OpenAI (Groq, OpenAI, Cerebras…) con la clave del usuario.
+/// (Gemini usa su API nativa: ver `GeminiEngine`.)
 /// ⚠️ El texto de la conversación sale del iPhone hacia el proveedor. Por eso es opt-in y se explica en su pantalla.
 /// Lo que el motor en la nube necesita del consumo del perfil: permiso previo (autorización y presupuesto), anotar lo gastado y lo que
 /// informó el proveedor sobre sus límites.
@@ -17,7 +18,7 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
     private let settings: CloudBrainSettings
     private let session: URLSession
     private let usage: UsageHooks?
-    /// Avisos de espera para la pantalla (p. ej. «Groq pidió esperar 6 s»). `nil` = ya no hay espera.
+    /// Avisos de espera para la pantalla (p. ej. «Groq: límite de tokens por minuto. Reintento en 6 s»). `nil` = ya no hay espera.
     var onStatus: (@Sendable (String?) -> Void)?
 
     init(descriptor: ModelDescriptor, settings: CloudBrainSettings, usage: UsageHooks? = nil) {
@@ -59,6 +60,8 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                         case .allow: break
                         }
                     }
+                    // ¿Está el proveedor en pausa por fallos que esperar no arregla? Se dice, sin enviar nada.
+                    try ProviderHTTP.checkBreaker(providerID: self.preset.id, providerName: self.preset.displayName)
                     guard let key = CloudKeyStore.read(providerID: self.preset.id) else {
                         throw EngineError.notReady(self.missingKeyReason)
                     }
@@ -70,62 +73,41 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                     urlRequest.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
                     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    // Tope de salida: el del tipo de petición (ahorro de tokens) o, si no, el margen de siempre para razonamiento oculto.
+                    let maxTokens: Int = request.outputBudget ?? max(request.maxTokens, OpenAIChatProtocol.minimumCloudTokens)
                     urlRequest.httpBody = try OpenAIChatProtocol.requestBody(
                         model: self.settings.model, system: request.system, turns: request.turns,
-                        maxTokens: max(request.maxTokens, OpenAIChatProtocol.minimumCloudTokens), temperature: request.temperature,
+                        maxTokens: maxTokens, temperature: request.temperature,
                         includeUsage: self.preset.streamUsage)
 
-                    // Petición con reintentos: un 429 (límite del plan gratuito) con espera corta se espera y se reintenta,
-                    // avisando en pantalla; un límite diario o una espera larga se informa tal cual, con las cifras del proveedor.
-                    var rateLimitRetries = 0
-                    var opened: URLSession.AsyncBytes?
-                    while opened == nil {
-                        let (bytes, response) = try await self.session.bytes(for: urlRequest)
-                        guard let http = response as? HTTPURLResponse else {
-                            throw EngineError.generationFailed("Respuesta no válida del proveedor.")
-                        }
-                        if (200..<300).contains(http.statusCode) {
-                            // Lo que el proveedor informe sobre sus límites (si no informa nada, no se muestra nada).
-                            var lowered: [String: String] = [:]
-                            for (key, value) in http.allHeaderFields {
-                                if let name = key as? String, let text = value as? String { lowered[name.lowercased()] = text }
-                            }
-                            let snapshot = ProviderLimitsSnapshot.from(headers: lowered)
-                            if !snapshot.isEmpty { self.usage?.limits(self.preset.id, snapshot) }
-                            opened = bytes
-                            break
-                        }
-                        var body = ""
-                        for try await line in bytes.lines {
-                            body += line
-                            if body.count > 8_000 { break }
-                        }
-                        // El mismo «tool_use_failed» también puede llegar como error HTTP 400: se rescata igual.
-                        if http.statusCode == 400, let failed = OpenAIChatProtocol.failedGeneration(inBody: body) {
-                            let calls = ToolCallRecovery.extract(from: failed)
-                            if !calls.isEmpty {
-                                for call in calls { continuation.yield("\(Persona.toolOpen)\(call)\(Persona.toolClose)\n") }
-                                continuation.finish()
-                                return
-                            }
-                        }
-                        if http.statusCode == 429 {
-                            let limit = OpenAIChatProtocol.parseRateLimit(retryAfterHeader: http.value(forHTTPHeaderField: "retry-after"), body: body)
-                            Diagnostics.shared.log("límite de \(self.preset.displayName): ventana \(limit.window.rawValue), espera \(limit.retryAfter.map { String($0) } ?? "?") s, \(limit.detail ?? "sin cifras"), intento \(rateLimitRetries + 1)")
-                            if rateLimitRetries < OpenAIChatProtocol.maxRateLimitRetries, let wait = OpenAIChatProtocol.automaticWait(for: limit) {
-                                rateLimitRetries += 1
-                                self.onStatus?("\(self.preset.displayName) pidió esperar \(OpenAIChatProtocol.humanDuration(wait)) (límite del plan gratuito). Reintento solo…")
-                                try await Task.sleep(nanoseconds: UInt64((wait + 0.4) * 1_000_000_000))
-                                self.onStatus?(nil)
-                                continue
-                            }
-                            self.onStatus?(nil)
-                            throw EngineError.generationFailed(OpenAIChatProtocol.rateLimitMessage(limit, provider: self.preset.displayName))
-                        }
-                        throw EngineError.generationFailed(OpenAIChatProtocol.errorMessage(
-                            status: http.statusCode, body: body, provider: self.preset.displayName, model: self.settings.model))
+                    // Apertura con reintentos acotados: solo los límites por minuto y los fallos breves se esperan; el saldo agotado,
+                    // la cuota diaria, la clave o el modelo se informan tal cual (con las cifras del proveedor) y NO se reintentan.
+                    let settingsCopy: CloudBrainSettings = self.settings
+                    let opened = try await ProviderHTTP.open(
+                        session: self.session, request: urlRequest, providerID: self.preset.id, providerName: self.preset.displayName,
+                        model: self.settings.model, onStatus: self.onStatus,
+                        rescue: { body in
+                            // El mismo «tool_use_failed» también puede llegar como error HTTP 400: se rescata igual.
+                            guard let failed = OpenAIChatProtocol.failedGeneration(inBody: body) else { return [] }
+                            return ToolCallRecovery.extract(from: failed)
+                        },
+                        enrich: { failure, message in
+                            guard failure.kind == .modelNotFound,
+                                  let listing = try? await CloudConnectionTester.listModels(settings: settingsCopy), !listing.ids.isEmpty else { return message }
+                            return message + " Modelos disponibles con tu clave: " + listing.ids.prefix(8).joined(separator: ", ") + "."
+                        })
+                    let bytes: URLSession.AsyncBytes
+                    switch opened {
+                    case .rescued(let calls):
+                        for call in calls { continuation.yield("\(Persona.toolOpen)\(call)\(Persona.toolClose)\n") }
+                        continuation.finish()
+                        return
+                    case .stream(let stream, let limits):
+                        // Lo que el proveedor informe sobre sus límites (si no informa nada, no se muestra nada).
+                        if let limits = limits { self.usage?.limits(self.preset.id, limits) }
+                        bytes = stream
                     }
-                    guard let bytes = opened else { throw EngineError.generationFailed("Respuesta no válida del proveedor.") }
+                    ProviderHealth.breaker.recordSuccess(self.preset.id)
                     var yielded = false
                     var finishReason: String?
                     var reported: TokenUsage?
@@ -179,6 +161,8 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: EngineError.cancelled)
+                } catch let error as ProviderFailureError {
+                    continuation.finish(throwing: error)
                 } catch let error as EngineError {
                     continuation.finish(throwing: error)
                 } catch let error as URLError {
@@ -205,38 +189,95 @@ final class CloudEngine: LanguageModelEngine, EngineStatusReporting, @unchecked 
     }
 }
 
-/// Comprueba la clave y lista los modelos reales del proveedor (los nombres y límites gratuitos cambian con el tiempo).
+/// Comprueba la clave y lista los modelos REALES de la cuenta (los nombres y límites cambian con el tiempo y Google retira modelos).
+/// Para Gemini usa su API nativa y solo muestra los que admiten `generateContent`.
 enum CloudConnectionTester {
-    struct Report { let ok: Bool; let message: String }
+    struct Report {
+        let ok: Bool
+        let message: String
+        var models: [String] = []
+        var suggestedLight: String?
+        var suggestedStrong: String?
+    }
+
+    struct Listing {
+        let ids: [String]
+        let suggestedLight: String?
+        let suggestedStrong: String?
+    }
+
+    private static func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 20
+        return URLSession(configuration: configuration)
+    }
+
+    private static func failure(_ http: HTTPURLResponse, data: Data, preset: CloudProviderPreset, model: String) -> ProviderFailureError {
+        let body: String = String(data: data.prefix(4_000), encoding: .utf8) ?? ""
+        let classified: ProviderFailure = ProviderFailureClassifier.classify(status: http.statusCode, headers: ProviderHTTP.lowercased(http), body: body)
+        return ProviderFailureError(failure: classified, message: classified.userMessage(provider: preset.displayName, model: model))
+    }
+
+    /// Modelos de conversación disponibles con la clave guardada. Lanza `ProviderFailureError` si el proveedor lo rechaza.
+    static func listModels(settings raw: CloudBrainSettings) async throws -> Listing {
+        let settings = raw.sanitized()
+        let preset = settings.preset
+        guard let key = CloudKeyStore.read(providerID: preset.id) else {
+            throw EngineError.notReady("Primero guarda la clave de \(preset.displayName).")
+        }
+        let session = makeSession()
+        if preset.id == CloudProviders.gemini.id {
+            var all: [GeminiModelInfo] = []
+            var token: String?
+            for _ in 0..<4 {
+                guard let url = GeminiProtocol.modelsURL(pageToken: token) else { break }
+                var request = URLRequest(url: url)
+                request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else { throw EngineError.generationFailed("Respuesta no válida.") }
+                guard (200..<300).contains(http.statusCode) else { throw failure(http, data: data, preset: preset, model: settings.model) }
+                let page = GeminiModels.parseList(data)
+                all.append(contentsOf: page.models)
+                token = page.nextPageToken
+                if token == nil { break }
+            }
+            let chat: [GeminiModelInfo] = GeminiModels.chatModels(all)
+            return Listing(ids: chat.map(\.id), suggestedLight: GeminiModels.suggest(.light, from: all), suggestedStrong: GeminiModels.suggest(.strong, from: all))
+        }
+        guard let url = OpenAIChatProtocol.endpoint(preset, path: "models") else {
+            throw EngineError.generationFailed("URL del proveedor no válida.")
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw EngineError.generationFailed("Respuesta no válida.") }
+        guard (200..<300).contains(http.statusCode) else { throw failure(http, data: data, preset: preset, model: settings.model) }
+        return Listing(ids: CloudModelFilter.chatCandidates(OpenAIChatProtocol.parseModelIDs(data)), suggestedLight: nil, suggestedStrong: nil)
+    }
 
     static func test(_ raw: CloudBrainSettings) async -> Report {
         let settings = raw.sanitized()
         let preset = settings.preset
-        guard let key = CloudKeyStore.read(providerID: preset.id) else {
+        guard CloudKeyStore.hasKey(providerID: preset.id) else {
             return Report(ok: false, message: "Primero guarda la clave de \(preset.displayName).")
         }
-        guard let url = OpenAIChatProtocol.endpoint(preset, path: "models") else {
-            return Report(ok: false, message: "URL del proveedor no válida.")
-        }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 20
         do {
-            let (data, response) = try await URLSession(configuration: configuration).data(for: request)
-            guard let http = response as? HTTPURLResponse else { return Report(ok: false, message: "Respuesta no válida.") }
-            guard (200..<300).contains(http.statusCode) else {
-                let body = String(data: data.prefix(2_000), encoding: .utf8) ?? ""
-                return Report(ok: false, message: OpenAIChatProtocol.errorMessage(
-                    status: http.statusCode, body: body, provider: preset.displayName, model: settings.model))
+            let listing = try await listModels(settings: settings)
+            ProviderHealth.breaker.reset(preset.id)               // la clave funciona: se levanta una pausa anterior
+            if listing.ids.isEmpty {
+                return Report(ok: true, message: "Clave aceptada, pero el proveedor no listó modelos de conversación. Prueba a conversar.")
             }
-            let ids = OpenAIChatProtocol.parseModelIDs(data)
-            if ids.isEmpty { return Report(ok: true, message: "Clave aceptada, pero el proveedor no listó modelos. Prueba a conversar.") }
-            if ids.contains(settings.model) {
-                return Report(ok: true, message: "Conexión correcta. El modelo «\(settings.model)» está disponible (\(ids.count) modelos en total).")
+            if listing.ids.contains(settings.model) {
+                return Report(ok: true, message: "Conexión correcta. El modelo «\(settings.model)» está disponible (\(listing.ids.count) modelos de conversación).",
+                              models: listing.ids, suggestedLight: listing.suggestedLight, suggestedStrong: listing.suggestedStrong)
             }
-            let sample = ids.prefix(10).joined(separator: ", ")
-            return Report(ok: false, message: "La clave funciona, pero el modelo «\(settings.model)» no aparece. Disponibles: \(sample). Escribe uno de ellos en «Modelo».")
+            return Report(ok: false,
+                          message: "La clave funciona, pero el modelo «\(settings.model)» NO está disponible con tu cuenta. Estos sí lo están (toca uno para elegirlo):",
+                          models: listing.ids, suggestedLight: listing.suggestedLight, suggestedStrong: listing.suggestedStrong)
+        } catch let error as ProviderFailureError {
+            return Report(ok: false, message: error.message)
+        } catch let error as EngineError {
+            return Report(ok: false, message: error.localizedDescription)
         } catch let error as URLError {
             return Report(ok: false, message: CloudEngine.describe(error))
         } catch {

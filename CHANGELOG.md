@@ -2,7 +2,20 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
-## [0.8.0-dev] — Evolución (en curso; ver AUDIT_0_8.md)
+
+
+## [0.8.1-dev] — Motor de inteligencia, ahorro de tokens y disponibilidad multiproveedor
+
+Tras la primera prueba en el iPhone (Groq pedía esperar siempre, OpenAI decía «límite diario» sin haber usado nada, Gemini daba «modelo no encontrado», «Consumo» no se encontraba):
+
+- **Errores de proveedor clasificados** (`ProviderFailure.swift`): 429 temporal, tokens/solicitudes por minuto, cuota diaria, sin crédito (`insufficient_quota` ya no se llama «plan gratuito»), modelo inexistente, clave inválida, acceso denegado, servicio caído. Lee `Retry-After`, `retryDelay` de Google y `x-ratelimit-reset-*`; reintentos acotados (2) solo donde esperar sirve; interruptor de seguridad (circuit breaker) por proveedor.
+- **Gemini nativo** (`GeminiProtocol.swift`, `GeminiEngine.swift`): `streamGenerateContent`, clave en cabecera, imágenes `inlineData`, consumo real de `usageMetadata`. «Probar conexión» lista los modelos que la clave SÍ puede usar (solo `generateContent`) y se elige tocando uno; nunca se cambia de modelo en silencio. `gemini-2.5-flash` ya no responde (404 en el iPhone; Google lo retiró): el modelo por defecto pasa a `gemini-2.5-flash-lite`.
+- **Enrutador de inteligencia** (`IntelligenceRouter.swift`, Ajustes › Enrutador): clasifica cada mensaje (9 tipos); la hora y la fecha las resuelve el código sin modelo; modelo económico/capaz por proveedor; opcional, apagado por defecto; solo proveedores con clave y autorizados; «cambiar si falla» (apagado por defecto) nunca reenvía archivos, imágenes ni biblioteca y avisa en pantalla.
+- **Ahorro de tokens** (solo nube, activable): guías y herramientas solo del tema de la petición (el resto, nombre y argumentos), historial y salida acotados por tipo, resumen local extractivo de lo recortado, caché en memoria de preguntas generales repetidas (nunca calendario, clima, contactos, noticias ni precios).
+- **Consumo**: «Hoy» y «Este mes» por proveedor y modelo, medido vs estimado, disponibilidad por proveedor con motivo de pausa y «Reintentar ahora», aviso configurable.
+- **Voz**: sin cambios en el código; la cola de frases, cancelación e interrupción ya existían (0.7/0.8-D) y las pausas solo se pueden diagnosticar con el banco de voz en el dispositivo.
+- Prueba existente ajustada: `testFollowUpsSeeTheDocumentOnlyWhenTheyAreAboutIt` usaba «¿Qué hora es?» como pregunta ajena; ahora la hora la responde el código sin modelo.
+## [0.8.0-dev] — Evolución (fases A–I; ver AUDIT_0_8.md)
 
 - Estado (2026-11-11): fases A–I completas; CI verde en 4b0fc1a (estáticas + Companion Node, core, no-mlx, full) e IPA compilado. Sin probar en iPhone real.
 

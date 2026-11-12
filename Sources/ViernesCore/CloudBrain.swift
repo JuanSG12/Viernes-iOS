@@ -36,9 +36,9 @@ public enum CloudProviders {
     public static let gemini = CloudProviderPreset(
         id: "gemini", displayName: "Google Gemini",
         baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-        defaultModel: "gemini-2.5-flash",
+        defaultModel: "gemini-2.5-flash-lite",
         keyPageURL: "https://aistudio.google.com/apikey",
-        note: "Clave desde Google AI Studio. Los modelos y límites del plan gratuito cambian con frecuencia: usa «Probar conexión» para ver los disponibles."
+        note: "Clave desde Google AI Studio; usa la API nativa de Gemini. Google retira modelos (gemini-2.5-flash ya no responde): «Probar conexión» lista los que tu clave SÍ puede usar y puedes tocar uno para elegirlo."
     )
 
     public static let openAI = CloudProviderPreset(
@@ -46,7 +46,7 @@ public enum CloudProviders {
         baseURL: "https://api.openai.com/v1",
         defaultModel: "gpt-4o-mini",
         keyPageURL: "https://platform.openai.com/api-keys",
-        note: "La API de OpenAI se paga por uso: configura un presupuesto mensual y las tarifas en Ajustes › Consumo y presupuesto. Los modelos cambian: usa «Probar conexión» para ver los disponibles en tu cuenta.",
+        note: "La API de OpenAI se paga por uso y no tiene plan gratuito: si la cuenta no tiene crédito, responde «insufficient_quota» aunque no hayas usado nada. Configura un presupuesto y las tarifas en Ajustes › Consumo y presupuesto. «Probar conexión» lista los modelos de tu cuenta.",
         streamUsage: true
     )
     public static let cerebras = CloudProviderPreset(

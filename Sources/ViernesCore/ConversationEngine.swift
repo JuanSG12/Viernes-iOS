@@ -47,6 +47,9 @@ public struct ConversationConfig: Sendable {
     public var missionsEnabled: Bool
     /// Investigación web (búsqueda y lectura de páginas): apagada por defecto; la enciende el usuario eligiendo un buscador y su clave.
     public var webResearchEnabled: Bool
+    /// Ahorro de tokens con cerebros en la nube: instrucciones y herramientas según el tema, historial y salida acotados por tipo de
+    /// petición, resumen local de lo recortado y caché de respuestas repetidas. No afecta a los modelos locales.
+    public var optimizeTokens: Bool
 
     /// 4 rondas = hasta 3 rondas de herramientas encadenadas (consultar → actuar → …) y una respuesta final.
     public init(memoryPolicy: MemoryPolicy = .default, claudeMode: ClaudeMode = .disabled, spokenOutput: Bool = true,
@@ -54,7 +57,8 @@ public struct ConversationConfig: Sendable {
                 memoryContextLimit: Int = 5, timeZone: TimeZone = .current,
                 calendarReadEnabled: Bool = false, contactsReadEnabled: Bool = false,
                 libraryEnabled: Bool = true, askBeforeCloudLibrary: Bool = true, profile: ProfileSettings = .default,
-                missionsEnabled: Bool = true, webResearchEnabled: Bool = false) {
+                missionsEnabled: Bool = true, webResearchEnabled: Bool = false, optimizeTokens: Bool = true) {
+        self.optimizeTokens = optimizeTokens
         self.webResearchEnabled = webResearchEnabled
         self.missionsEnabled = missionsEnabled
         self.profile = profile.sanitized()
@@ -91,6 +95,11 @@ public actor ConversationEngine {
     /// Historial de misiones (estado de cada una, para recuperarlas tras un cierre inesperado).
     private var missions: MissionStore?
     private let maxStoredMessages = 60
+    /// Elige el cerebro para una petición según su tipo (enrutador). `nil` = el cerebro de siempre. Solo se usa si el usuario lo activó.
+    private var routeProvider: (@Sendable (RequestClass) async -> LanguageModelEngine?)?
+    /// Temas de la última petición (para entender respuestas cortas como «A Checho» tras una pregunta del asistente).
+    private var lastGroups: Set<ToolGroup> = []
+    private let responseCache = ResponseCache()
 
     /// Estado de UNA respuesta: si lo que ve el modelo incluye contenido de archivos o de la biblioteca (no confiable) y qué fuentes se usaron.
     private final class RunState: @unchecked Sendable {
@@ -132,6 +141,7 @@ public actor ConversationEngine {
     public func setEngine(_ engine: LanguageModelEngine) { self.engine = engine }
     public func setKnowledge(_ provider: KnowledgeProvider?) { knowledge = provider }
     public func setMissions(_ store: MissionStore?) { missions = store }
+    public func setRouteProvider(_ provider: (@Sendable (RequestClass) async -> LanguageModelEngine?)?) { routeProvider = provider }
 
     // MARK: Misiones
 
@@ -206,11 +216,37 @@ public actor ConversationEngine {
     private func run(_ userText: String, attachments: AttachmentBundle?, engineOverride: LanguageModelEngine?,
                      excerptBudget: Int?, _ out: AsyncStream<ConversationEvent>.Continuation) async {
         out.yield(.thinking)
-        let brain: LanguageModelEngine = engineOverride ?? engine
         let bundle: AttachmentBundle? = (attachments?.isEmpty ?? true) ? nil : attachments
         var trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty, bundle != nil { trimmed = "Resume y explica lo que hay en los archivos adjuntos." }
         guard !trimmed.isEmpty else { out.yield(.failed("No escuché nada.")); return }
+
+        // Operaciones que el código resuelve solo (hora y fecha): cero llamadas al modelo, cero tokens.
+        if bundle == nil, let direct = DeterministicAnswers.answer(for: trimmed, now: clock(), timeZone: config.timeZone) {
+            diagnose("operación local resuelta sin modelo")
+            history.append(ChatMessage(role: .user, text: trimmed, date: clock()))
+            out.yield(.delta(direct))
+            let reply = ChatMessage(role: .assistant, text: direct, date: clock(), engineName: "Cálculo local (sin modelo)")
+            history.append(reply)
+            if history.count > maxStoredMessages { history.removeFirst(history.count - maxStoredMessages) }
+            lastGroups = []
+            out.yield(.completed(reply))
+            return
+        }
+
+        // Clasificación previa: decide qué cerebro, cuántas instrucciones, cuánto historial y cuánta salida necesita la petición.
+        let lastAssistantText: String = history.last(where: { $0.role == .assistant })?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasDocs: Bool = !(bundle?.documents.isEmpty ?? true)
+            || (!activeDocuments.isEmpty && ExcerptSelector.isRelevant(query: trimmed, documents: activeDocuments))
+        let analysis: RequestAnalysis = RequestClassifier.analyze(
+            trimmed, hasImages: !(bundle?.images.isEmpty ?? true), hasDocuments: hasDocs,
+            previousGroups: lastGroups, lastAssistantAskedQuestion: lastAssistantText.hasSuffix("?"))
+        lastGroups = analysis.groups
+        var routed: LanguageModelEngine?
+        if engineOverride == nil, let provider = routeProvider { routed = await provider(analysis.kind) }
+        let brain: LanguageModelEngine = engineOverride ?? routed ?? engine
+        let optimize: Bool = config.optimizeTokens && brain.descriptor.isCloud
+        diagnose("petición: \(analysis.kind.rawValue) (\(analysis.reason)); cerebro: \(brain.descriptor.displayName)\(optimize ? "; ahorro de tokens" : "")")
 
         history.append(ChatMessage(role: .user, text: trimmed, date: clock(), attachments: bundle?.refs))
         var actions: [ActionRecord] = []
@@ -332,21 +368,49 @@ public actor ConversationEngine {
             contextMemories = MemoryRetriever.context(query: trimmed, items: all, limit: config.memoryContextLimit, now: clock())
         }
 
+        // Con ahorro de tokens (nube): detalle completo solo de las herramientas del tema de la petición; las demás, solo nombre y
+        // argumentos (así el modelo sigue sabiendo que existen si la clasificación se equivocó).
+        var promptTools: [ToolDefinition] = availableTools()
+        var compactTools: [ToolDefinition] = []
+        var focus: Set<ToolGroup>?
+        if optimize {
+            let split = ToolGroups.split(promptTools, focus: analysis.groups)
+            promptTools = split.detailed
+            compactTools = split.compact
+            focus = analysis.groups
+        }
         var baseSystem = Persona.systemPrompt(PersonaContext(
             now: clock(), timeZone: config.timeZone, engine: brain.descriptor, memories: contextMemories,
-            tools: availableTools(), claudeMode: config.claudeMode, spokenOutput: config.spokenOutput, profile: config.profile
+            tools: promptTools, claudeMode: config.claudeMode, spokenOutput: config.spokenOutput, profile: config.profile,
+            compactTools: compactTools, focus: focus
         ))
         if hasBlock { baseSystem += "\n\n" + UntrustedContent.systemRules }
         if !images.isEmpty { baseSystem += "\n\n" + Persona.visionRules }
-        var system = baseSystem
 
         // El bloque de archivos ocupa parte de la petición: se recorta el historial para no pasarse del límite del proveedor.
-        let historyBudget = max(1_500, config.historyCharBudget - (untrustedBlock?.count ?? 0))
-        var turns = Self.turns(from: Array(history.dropLast()), budget: historyBudget)
+        let allowedHistory: Int = optimize ? min(config.historyCharBudget, analysis.kind.historyChars) : config.historyCharBudget
+        let historyBudget = max(optimize ? 800 : 1_500, allowedHistory - (untrustedBlock?.count ?? 0))
+        let earlier: [ChatMessage] = Array(history.dropLast())
+        if optimize, let digest = HistoryCompactor.digest(HistoryCompactor.dropped(from: earlier, budget: historyBudget)) {
+            baseSystem += "\n\n" + digest
+        }
+        var system = baseSystem
+        var turns = Self.turns(from: earlier, budget: historyBudget)
         var userContent = trimmed + firstUserSuffix
         if let block = untrustedBlock { userContent = block + "\n\nPetición del usuario: " + userContent }
         turns.append(ChatTurn(role: .user, content: userContent, images: images))
 
+        // Caché de respuestas repetidas: solo preguntas generales sin documentos, imágenes ni herramientas, y nunca con información
+        // que cambia (calendario, clima, contactos, noticias, precios…). Dura minutos y vive solo en memoria.
+        var cacheKey: String?
+        if optimize, !hasBlock, images.isEmpty, firstUserSuffix.isEmpty, ResponseCache.isCacheable(text: trimmed, kind: analysis.kind) {
+            // Una pregunta completa por sí sola se reutiliza aunque la conversación haya avanzado; una corta («¿y eso?») depende del historial.
+            let selfContained: Bool = trimmed.count >= 25
+            let previous: [String] = selfContained ? [] : turns.dropLast().map(\.content)
+            let context: String = (previous + contextMemories.map(\.text)).joined(separator: "\u{1F}")
+            cacheKey = ResponseCache.key(provider: "nube", model: brain.descriptor.displayName, userText: trimmed, context: context)
+        }
+        var servedFromCache = false
         var displayText = ""
         var emptyRetries = 0
         /// Llamadas ya ejecutadas en este mensaje: una llamada «rescatada» de un texto no se repite si el modelo la copia de vuelta.
@@ -357,6 +421,13 @@ public actor ConversationEngine {
             round += 1
             if round >= maxRounds { break }
             if Task.isCancelled { return }
+            if round == 0, let key = cacheKey, let cached = responseCache.get(key, now: clock()) {
+                diagnose("respuesta repetida servida desde la caché local (sin llamar al proveedor)")
+                servedFromCache = true
+                out.yield(.delta(cached))
+                displayText = cached
+                break
+            }
             let filter = StreamingTagFilter(specs: [
                 .init(open: Persona.toolOpen, close: Persona.toolClose, capture: true),
                 .init(open: "<think>", close: "</think>", capture: false),
@@ -367,7 +438,9 @@ public actor ConversationEngine {
             var rawRound = ""          // salida cruda del modelo (para rescatar llamadas en otro formato y para diagnosticar)
 
             do {
-                let request = GenerationRequest(system: system, turns: turns)
+                var request = GenerationRequest(system: system, turns: turns)
+                if optimize { request.outputBudget = analysis.kind.outputBudget }
+                request.sensitive = hasBlock || !images.isEmpty
                 for try await delta in brain.generate(request) {
                     if Task.isCancelled { return }
                     if rawRound.utf8.count < 20_000 { rawRound += delta }
@@ -423,6 +496,7 @@ public actor ConversationEngine {
             }
             for record in records { out.yield(.action(record)) }
             actions.append(contentsOf: records)
+            for record in records where record.tool != "desconocida" { lastGroups.insert(ToolGroups.group(of: record.tool)) }
 
             if records.isEmpty || round == maxRounds - 1 { break }
 
@@ -434,6 +508,7 @@ public actor ConversationEngine {
         }
 
         var finalText = displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let key = cacheKey, !servedFromCache, actions.isEmpty, !finalText.isEmpty { responseCache.put(key, text: finalText, now: clock()) }
         if finalText.isEmpty {
             if actions.isEmpty {
                 diagnose("sin texto ni acciones tras \(emptyRetries) reintento(s)")

@@ -80,6 +80,28 @@ struct CloudBrainView: View {
                 if let report {
                     Label(report.message, systemImage: report.ok ? "checkmark.circle" : "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(report.ok ? Theme.accent : Theme.alert)
+                    if !report.models.isEmpty {
+                        // Modelos REALES de tu cuenta (los lista el proveedor con tu clave). Tocar uno lo elige; nada se cambia solo.
+                        ForEach(Array(report.models.prefix(40)), id: \.self) { id in
+                            Button {
+                                model.settings.cloud = CloudBrainSettings(providerID: cloud.providerID, model: id)
+                                self.report = CloudConnectionTester.Report(ok: true, message: "Modelo elegido: «\(id)».", models: report.models,
+                                                                           suggestedLight: report.suggestedLight, suggestedStrong: report.suggestedStrong)
+                            } label: {
+                                HStack {
+                                    Text(id).font(.footnote.monospaced()).foregroundStyle(Theme.textPrimary)
+                                    Spacer()
+                                    if id == cloud.model { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
+                                }
+                            }
+                        }
+                        if let light = report.suggestedLight {
+                            Text("Sugerido para tareas frecuentes (económico): \(light)").font(.caption2).foregroundStyle(Theme.textSecondary)
+                        }
+                        if let strong = report.suggestedStrong {
+                            Text("Sugerido para tareas complejas: \(strong)").font(.caption2).foregroundStyle(Theme.textSecondary)
+                        }
+                    }
                 }
             }
             .listRowBackground(Theme.carbon.opacity(0.5))

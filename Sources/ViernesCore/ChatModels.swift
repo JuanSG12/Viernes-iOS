@@ -96,6 +96,11 @@ public struct GenerationRequest: Sendable {
     public var turns: [ChatTurn]          // el último turno es del usuario
     public var maxTokens: Int
     public var temperature: Double
+    /// Tope de salida elegido por el tipo de petición (solo nube). `nil` = el comportamiento de siempre (`maxTokens`, con el mínimo de la nube).
+    public var outputBudget: Int?
+    /// La petición lleva contenido que el usuario NO autorizó enviar a otro proveedor (fragmentos de la biblioteca, archivos o imágenes):
+    /// ningún cambio automático a otro proveedor puede reenviarla.
+    public var sensitive: Bool = false
     public init(system: String, turns: [ChatTurn], maxTokens: Int = 512, temperature: Double = 0.6) {
         self.system = system
         self.turns = turns

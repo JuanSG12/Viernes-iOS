@@ -30,6 +30,9 @@ struct SettingsView: View {
                 NavigationLink { UsageView() } label: {
                     row(icon: "chart.bar", title: "Consumo y presupuesto", detail: "Tokens, costo estimado, límite mensual, proveedores autorizados", status: nil)
                 }.accessibilityIdentifier("settings-usage")
+                NavigationLink { RoutingView() } label: {
+                    row(icon: "arrow.triangle.branch", title: "Enrutador de inteligencia", detail: model.settings.routingSettings.enabled ? "Activo · elige proveedor según la tarea" : "Apagado · ahorro de tokens \(model.settings.tokenSaverEnabled ? "activo" : "apagado")", status: nil)
+                }.accessibilityIdentifier("settings-routing")
                 NavigationLink { WebResearchView() } label: {
                     row(icon: "globe", title: "Investigación web", detail: model.settings.webSettings.enabled ? "Activa · \(model.settings.webSettings.provider.displayName)" : "Apagada (opcional; necesita la clave de un buscador)", status: nil)
                 }.accessibilityIdentifier("settings-web")

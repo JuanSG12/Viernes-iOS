@@ -201,11 +201,16 @@ final class AppModel: ObservableObject {
                                                                      contactsReadEnabled: loaded.contactsReadEnabled,
                                                                      libraryEnabled: loaded.attachmentSettings.libraryOn,
                                                                      askBeforeCloudLibrary: loaded.attachmentSettings.askBeforeCloud,
-                                                                     profile: loaded.profileSettings, webResearchEnabled: Self.webEnabled(loaded)),
+                                                                     profile: loaded.profileSettings, webResearchEnabled: Self.webEnabled(loaded),
+                                                                     optimizeTokens: loaded.tokenSaverEnabled),
                                           knowledge: library, missions: missions)
         wireServices()
         speaker.pronunciation = loaded.profileSettings.personality.pronunciation
         memoryUnlocked = !loaded.requireBiometricsForMemory      // con Face ID exigido, la memoria arranca BLOQUEADA
+        // Enrutador de inteligencia: solo actúa si el usuario lo activó (por defecto está apagado y se usa el cerebro elegido).
+        Task { [weak self] in
+            await self?.conversation.setRouteProvider({ [weak self] kind in await self?.routedEngine(for: kind) })
+        }
     }
 
     // MARK: Arranque
@@ -398,7 +403,8 @@ final class AppModel: ObservableObject {
             historyCharBudget: activeModel.isCloud ? 7_000 : (activeModel.isSystemModel ? 4_500 : 6_000),
             calendarReadEnabled: settings.calendarReadEnabled, contactsReadEnabled: settings.contactsReadEnabled,
             libraryEnabled: settings.attachmentSettings.libraryOn, askBeforeCloudLibrary: settings.attachmentSettings.askBeforeCloud,
-            profile: settings.profileSettings, webResearchEnabled: Self.webEnabled(settings)
+            profile: settings.profileSettings, webResearchEnabled: Self.webEnabled(settings),
+            optimizeTokens: settings.tokenSaverEnabled
         ))
     }
 
@@ -421,6 +427,7 @@ final class AppModel: ObservableObject {
         if settings.profile != old.profile { tools.defaultRegion = settings.profileSettings.region; tools.webLanguage = settings.profileSettings.responseLanguage }
         if settings.web != old.web { tools.webProvider = settings.webSettings.provider; Task { await pushConversationConfig() } }
         if settings.cloudBrain != old.cloudBrain { refreshCloudEngine() }
+        if settings.tokenSaver != old.tokenSaver { Task { await pushConversationConfig() } }
         if settings.recognitionLocale != old.recognitionLocale {
             voices = SpeechSpeaker.rankedSpanishVoices(preferredLanguage: settings.recognitionLocale)
         }
@@ -892,14 +899,63 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    /// Última decisión del enrutador (para mostrarla en Ajustes › Enrutador).
+    @Published var lastRouteNote: String?
+
+    private func cloudDescriptor(providerID: String, model: String) -> ModelDescriptor {
+        let preset = CloudProviders.preset(id: providerID)
+        return ModelDescriptor(id: "route.\(providerID)", displayName: "\(preset.displayName) · \(model)", backend: .cloud, approxDownloadMB: 0,
+                               minDeviceRAMGB: 0, license: "Términos del proveedor elegido", spanishQuality: 5,
+                               notes: "Cerebro en la nube elegido por el enrutador para este mensaje.")
+    }
+
+    /// Elige el cerebro para una petición según su tipo, SOLO entre los proveedores con clave guardada que el usuario autorizó y que
+    /// no están en pausa ni sin presupuesto. `nil` = usar el cerebro activo (enrutador apagado, o nada elegible, o va el modelo local).
+    /// Con «cambiar si falla» encendido, los siguientes proveedores autorizados quedan de reserva (nunca con archivos o imágenes).
+    @MainActor
+    func routedEngine(for kind: RequestClass) -> LanguageModelEngine? {
+        let routing = settings.routingSettings
+        guard routing.enabled else { lastRouteNote = nil; return nil }
+        let policies = settings.usageSettings
+        var configured = Set<String>()
+        var authorized = Set<String>()
+        var healthy = Set<String>()
+        for preset in CloudProviders.all {
+            guard CloudKeyStore.hasKey(providerID: preset.id) else { continue }
+            configured.insert(preset.id)
+            if policies.policy(for: preset.id).authorized { authorized.insert(preset.id) }
+            guard ProviderHealth.breaker.allows(preset.id) else { continue }
+            if case .block = usage.gate(providerID: preset.id, model: routing.model(for: preset.id, tier: .light, selected: settings.cloudBrain)) { continue }
+            healthy.insert(preset.id)
+        }
+        let inputs = RouteInputs(configured: configured, authorized: authorized, healthy: healthy,
+                                 localReady: !activeModel.isCloud && engineStatus.isReady, selected: settings.cloudBrain)
+        guard let decision = IntelligenceRouter.decide(kind: kind, settings: routing, inputs: inputs) else { lastRouteNote = nil; return nil }
+        lastRouteNote = decision.reason
+        guard case .cloud = decision.target else { return nil }
+        var candidates: [FailoverEngine.Candidate] = []
+        var targets: [RouteTarget] = [decision.target]
+        targets.append(contentsOf: decision.fallbacks)
+        for target in targets {
+            guard case .cloud(let provider, let chosenModel) = target else { continue }
+            let engine = EngineProvider.makeCloudEngine(descriptor: cloudDescriptor(providerID: provider, model: chosenModel),
+                                                        settings: CloudBrainSettings(providerID: provider, model: chosenModel), usage: usageHooks)
+            candidates.append(FailoverEngine.Candidate(engine: engine, label: CloudProviders.preset(id: provider).displayName))
+        }
+        guard !candidates.isEmpty else { return nil }
+        let failover = FailoverEngine(candidates: candidates)
+        failover.onStatus = { [weak self] text in Task { @MainActor in self?.engineWaitNote = text } }
+        return failover
+    }
+
     /// Cerebro en la nube distinto del activo, creado SOLO para este mensaje (el activo no cambia).
     private func makeOverrideEngine(for brain: BrainProfile, current: BrainProfile) -> LanguageModelEngine? {
         guard brain.id != current.id, brain.isCloud, let provider = brain.providerID, let model = brain.model else { return nil }
         let descriptor = ModelDescriptor(id: brain.id, displayName: brain.displayName, backend: .cloud, approxDownloadMB: 0, minDeviceRAMGB: 0,
                                          license: "Términos del proveedor elegido", spanishQuality: 5,
                                          notes: "Cerebro en la nube usado solo para este mensaje.")
-        let engine = CloudEngine(descriptor: descriptor, settings: CloudBrainSettings(providerID: provider, model: model), usage: usageHooks)
-        engine.onStatus = { [weak self] text in Task { @MainActor in self?.engineWaitNote = text } }
+        let engine = EngineProvider.makeCloudEngine(descriptor: descriptor, settings: CloudBrainSettings(providerID: provider, model: model), usage: usageHooks)
+        (engine as? EngineStatusReporting)?.onStatus = { [weak self] text in Task { @MainActor in self?.engineWaitNote = text } }
         return engine
     }
 
