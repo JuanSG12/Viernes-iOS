@@ -364,11 +364,13 @@ final class ViernesUITests: XCTestCase {
         let app = launch()
         openSettingsRow(app, "settings-usage")
         let status = field(app, "usage-status")
+        reveal(status, in: app)
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         XCTAssertTrue(status.label.contains("Sin presupuesto"), "Por defecto no hay límite: «\(status.label)»")
         let ten = app.buttons["usage-budget-10"]
         reveal(ten, in: app)
         ten.tap()
+        reveal(status, in: app)
         let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "US$ 10"), object: status)
         XCTAssertEqual(XCTWaiter().wait(for: [updated], timeout: 10), .completed, "El estado refleja el presupuesto elegido: «\(status.label)»")
         XCTAssertTrue(status.label.contains("Gastado"), status.label)
