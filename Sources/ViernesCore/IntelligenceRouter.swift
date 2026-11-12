@@ -402,7 +402,7 @@ public enum RouteTarget: Equatable, Sendable {
     case cloud(providerID: String, model: String)
 }
 
-public struct RouteDecision: Equatable, Sendable {
+public struct IntelligenceRoute: Equatable, Sendable {
     public var kind: RequestClass
     public var target: RouteTarget
     public var fallbacks: [RouteTarget]
@@ -411,13 +411,13 @@ public struct RouteDecision: Equatable, Sendable {
 
 public enum IntelligenceRouter {
     /// `nil` = no enrutar (apagado, o ningún proveedor elegible): la app usa el cerebro que el usuario eligió.
-    public static func decide(kind: RequestClass, settings raw: RoutingSettings, inputs: RouteInputs) -> RouteDecision? {
+    public static func decide(kind: RequestClass, settings raw: RoutingSettings, inputs: RouteInputs) -> IntelligenceRoute? {
         let settings: RoutingSettings = raw.sanitized()
         guard settings.enabled else { return nil }
         let tier: ModelTier = kind.needsStrongModel ? .strong : .light
 
         if kind.localFriendly, settings.preferLocalForSimple, inputs.localReady {
-            return RouteDecision(kind: kind, target: .local, fallbacks: [], reason: "\(kind.title) → modelo local (privado, sin cuota)")
+            return IntelligenceRoute(kind: kind, target: .local, fallbacks: [], reason: "\(kind.title) → modelo local (privado, sin cuota)")
         }
         var order: [String] = settings.order
         if tier == .light, let eco = settings.economyProviderID, let index = order.firstIndex(of: eco) {
@@ -430,7 +430,7 @@ public enum IntelligenceRouter {
         let fallbacks: [RouteTarget] = settings.allowFailover
             ? eligible.dropFirst().map { RouteTarget.cloud(providerID: $0, model: settings.model(for: $0, tier: tier, selected: inputs.selected)) }
             : []
-        return RouteDecision(kind: kind, target: .cloud(providerID: first, model: model), fallbacks: fallbacks,
+        return IntelligenceRoute(kind: kind, target: .cloud(providerID: first, model: model), fallbacks: fallbacks,
                              reason: "\(kind.title) → \(CloudProviders.preset(id: first).displayName) (\(model))")
     }
 }
