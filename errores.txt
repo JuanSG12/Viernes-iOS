@@ -1,0 +1,50 @@
+IPA  commit: 15576559610728b2fccd81be32e917560bc637a5
+=== errores de compilación
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Sources/ViernesCore/IntelligenceRouter.swift:405:15: error: invalid redeclaration of 'RouteDecision'
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Sources/ViernesCore/IntelligenceRouter.swift:414:106: error: 'RouteDecision' is ambiguous for type lookup in this context
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Sources/ViernesCore/IntelligenceRouter.swift:420:20: error: 'RouteDecision' cannot be constructed because it has no accessible initializers
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Sources/ViernesCore/IntelligenceRouter.swift:420:55: error: cannot infer contextual base in reference to member 'local'
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Sources/ViernesCore/IntelligenceRouter.swift:433:16: error: 'RouteDecision' cannot be constructed because it has no accessible initializers
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Sources/ViernesCore/IntelligenceRouter.swift:433:51: error: cannot infer contextual base in reference to member 'cloud'
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Sources/ViernesCore/ProviderCapabilities.swift:261:93: error: 'RouteDecision' is ambiguous for type lookup in this context
+=== últimas líneas
+    
+    Using response file: /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Intermediates.noindex/mlx-swift-lm.build/Release-iphoneos/MLXCXGrammar.build/Objects-normal/arm64/82b82416624d2658e5098eb0a28c15c5-common-args.resp
+    
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c++ -ivfsstatcache /Users/runner/work/Viernes-iOS/Viernes-iOS/build/SDKStatCaches.noindex/iphoneos26.5-23F81a-688ef53f1462e2c8f657fdc38a81448fee66e23052a0157c865c76b268046726.sdkstatcache -target
+
+SwiftExplicitDependencyGeneratePcm x86_64 /Users/runner/work/Viernes-iOS/Viernes-iOS/build/ModuleCache.noindex/os_workgroup-BZHWLSA5UQLZ2WTVWFE84KG4F.pcm
+
+CompileC /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Intermediates.noindex/mlx-swift-lm.build/Release-iphoneos/MLXCXGrammar.build/Objects-normal/arm64/regex_converter.o /Users/runner/work/Viernes-iOS/Viernes-iOS/build/SourcePackages/checkouts/mlx-swift-lm/Libraries/MLXCXGrammar/xgrammar/c
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS/Viernes.xcodeproj
+    
+    Using response file: /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Intermediates.noindex/mlx-swift-lm.build/Release-iphoneos/MLXCXGrammar.build/Objects-normal/arm64/82b82416624d2658e5098eb0a28c15c5-common-args.resp
+    
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c++ -ivfsstatcache /Users/runner/work/Viernes-iOS/Viernes-iOS/build/SDKStatCaches.noindex/iphoneos26.5-23F81a-688ef53f1462e2c8f657fdc38a81448fee66e23052a0157c865c76b268046726.sdkstatcache -target
+
+CompileC /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Intermediates.noindex/mlx-swift-lm.build/Release-iphoneos/MLXCXGrammar.build/Objects-normal/arm64/recursion_guard.o /Users/runner/work/Viernes-iOS/Viernes-iOS/build/SourcePackages/checkouts/mlx-swift-lm/Libraries/MLXCXGrammar/xgrammar/c
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS/Viernes.xcodeproj
+    
+    Using response file: /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Intermediates.noindex/mlx-swift-lm.build/Release-iphoneos/MLXCXGrammar.build/Objects-normal/arm64/82b82416624d2658e5098eb0a28c15c5-common-args.resp
+    
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c++ -ivfsstatcache /Users/runner/work/Viernes-iOS/Viernes-iOS/build/SDKStatCaches.noindex/iphoneos26.5-23F81a-688ef53f1462e2c8f657fdc38a81448fee66e23052a0157c865c76b268046726.sdkstatcache -target
+
+SwiftExplicitDependencyGeneratePcm x86_64 /Users/runner/work/Viernes-iOS/Viernes-iOS/build/ModuleCache.noindex/Dispatch-4T6HRPPCQ27T8667FVQ061AKG.pcm
+
+CompileC /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Intermediates.noindex/mlx-swift-lm.build/Release-iphoneos/MLXCXGrammar.build/Objects-normal/arm64/logging.o /Users/runner/work/Viernes-iOS/Viernes-iOS/build/SourcePackages/checkouts/mlx-swift-lm/Libraries/MLXCXGrammar/xgrammar/cpp/suppo
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS/Viernes.xcodeproj
+    
+    Using response file: /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Intermediates.noindex/mlx-swift-lm.build/Release-iphoneos/MLXCXGrammar.build/Objects-normal/arm64/82b82416624d2658e5098eb0a28c15c5-common-args.resp
+    
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c++ -ivfsstatcache /Users/runner/work/Viernes-iOS/Viernes-iOS/build/SDKStatCaches.noindex/iphoneos26.5-23F81a-688ef53f1462e2c8f657fdc38a81448fee66e23052a0157c865c76b268046726.sdkstatcache -target
+
+SwiftExplicitDependencyGeneratePcm x86_64 /Users/runner/work/Viernes-iOS/Viernes-iOS/build/ModuleCache.noindex/XPC-4DCRIMGR51VE2K3LXCL644XIZ.pcm
+
+** BUILD FAILED **
+
+
+The following build commands failed:
+	CompileSwift normal arm64 (in target 'ViernesCore' from project 'ViernesCore')
+	SwiftCompile normal arm64 Compiling\ AppSettings.swift,\ AttachmentIngestor.swift,\ Attachments.swift,\ CalendarEvents.swift,\ ChatModels.swift,\ ClaudeBridge.swift,\ CloudBrain.swift,\ CloudVoice.swift,\ Companion.swift,\ ContactResolver.swift,\ ContentHash.swift,\ ConversationEngine.swift,\ DeepL
+	Building project Viernes with scheme Viernes and configuration Release
+(3 failures)
