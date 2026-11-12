@@ -1,0 +1,46 @@
+core  commit: 69253080186b57c92c87c703f8167dd87f8b7bd6
+=== errores y pruebas fallidas
+    |         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Tests/ViernesCoreTests/IntelligenceTests.swift:345:9: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+error: fatalError
+=== últimas líneas
+347 |         }
+[83/94] Compiling ViernesCoreTests LeakGuardAndCardTests.swift
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Tests/ViernesCoreTests/IntelligenceTests.swift:345:9: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+343 | final class HistoryAndCacheTests: XCTestCase {
+344 |     private func messages(_ count: Int, length: Int) -> [ChatMessage] {
+345 |         (0..<count).map { index in
+    |         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+346 |             ChatMessage(role: index % 2 == 0 ? .user : .assistant, text: String(repeating: Character(UnicodeScalar(UInt8(97 + index % 20))), count: length))
+347 |         }
+[84/94] Compiling ViernesCoreTests MemoryAdvancedTests.swift
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Tests/ViernesCoreTests/IntelligenceTests.swift:345:9: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+343 | final class HistoryAndCacheTests: XCTestCase {
+344 |     private func messages(_ count: Int, length: Int) -> [ChatMessage] {
+345 |         (0..<count).map { index in
+    |         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+346 |             ChatMessage(role: index % 2 == 0 ? .user : .assistant, text: String(repeating: Character(UnicodeScalar(UInt8(97 + index % 20))), count: length))
+347 |         }
+[85/94] Compiling ViernesCoreTests MemoryTests.swift
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Tests/ViernesCoreTests/IntelligenceTests.swift:345:9: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+343 | final class HistoryAndCacheTests: XCTestCase {
+344 |     private func messages(_ count: Int, length: Int) -> [ChatMessage] {
+345 |         (0..<count).map { index in
+    |         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+346 |             ChatMessage(role: index % 2 == 0 ? .user : .assistant, text: String(repeating: Character(UnicodeScalar(UInt8(97 + index % 20))), count: length))
+347 |         }
+[86/94] Compiling ViernesCoreTests MissionTests.swift
+/Users/runner/work/Viernes-iOS/Viernes-iOS/Tests/ViernesCoreTests/IntelligenceTests.swift:345:9: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+343 | final class HistoryAndCacheTests: XCTestCase {
+344 |     private func messages(_ count: Int, length: Int) -> [ChatMessage] {
+345 |         (0..<count).map { index in
+    |         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+346 |             ChatMessage(role: index % 2 == 0 ? .user : .assistant, text: String(repeating: Character(UnicodeScalar(UInt8(97 + index % 20))), count: length))
+347 |         }
+[87/94] Compiling ViernesCoreTests UsageTests.swift
+[88/94] Compiling ViernesCoreTests Viernes2Tests.swift
+[89/94] Compiling ViernesCoreTests VoiceAndModelTests.swift
+[90/94] Compiling ViernesCoreTests VoiceBenchTests.swift
+[91/94] Compiling ViernesCoreTests VoiceEngineTests.swift
+[92/94] Compiling ViernesCoreTests WebResearchTests.swift
+error: fatalError
