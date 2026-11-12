@@ -342,9 +342,13 @@ final class TokenSavingPromptTests: XCTestCase {
 
 final class HistoryAndCacheTests: XCTestCase {
     private func messages(_ count: Int, length: Int) -> [ChatMessage] {
-        (0..<count).map { index in
-            ChatMessage(role: index % 2 == 0 ? .user : .assistant, text: String(repeating: Character(UnicodeScalar(UInt8(97 + index % 20))), count: length))
+        var result: [ChatMessage] = []
+        for index in 0..<count {
+            let role: ChatRole = index % 2 == 0 ? .user : .assistant
+            let letter: String = String(UnicodeScalar(UInt8(97 + index % 20)))
+            result.append(ChatMessage(role: role, text: String(repeating: letter, count: length)))
         }
+        return result
     }
 
     func testDroppedMessagesAreTheOldestOnesOutsideTheWindow() {
@@ -526,8 +530,12 @@ final class TokenSavingConversationTests: XCTestCase {
 
     func testTrimmedHistoryLeavesAShortLocalSummary() async {
         let (engine, scripted) = make(script: [["Hola."]])
-        let old = (0..<20).map { index in
-            ChatMessage(role: index % 2 == 0 ? .user : .assistant, text: "mensaje antiguo número \(index) " + String(repeating: "x", count: 280))
+        var old: [ChatMessage] = []
+        let filler: String = String(repeating: "x", count: 280)
+        for index in 0..<20 {
+            let role: ChatRole = index % 2 == 0 ? .user : .assistant
+            let text: String = "mensaje antiguo número \(index) \(filler)"
+            old.append(ChatMessage(role: role, text: text))
         }
         await engine.restore(old)
         _ = await collect(await engine.send("Hola"))
