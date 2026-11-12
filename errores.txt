@@ -1,0 +1,47 @@
+variante: full  commit: 393e727cef17824912cffc23e3e4e2d8968b39d2
+=== errores de compilación
+=== pruebas fallidas
+/Users/runner/work/Viernes-iOS/Viernes-iOS/App/ViernesUITests/ViernesUITests.swift:367: error: -[ViernesUITests.ViernesUITests testUsageScreenAppliesTheMonthlyBudget] : XCTAssertTrue failed
+2026-11-12 15:40:10.427686+0000 Viernes[69294:176097] [Viernes] handle_error:268: [00][00][00][00]: invalid chunk type
+Test Case '-[ViernesUITests.ViernesUITests testUsageScreenAppliesTheMonthlyBudget]' failed (52.302 seconds).
+=== últimas líneas de la compilación
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -resolve-src-symlinks /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFramew
+
+Copy /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/Frameworks/XCTest.framework /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework (in target 'ViernesUITests
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -resolve-src-symlinks /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XC
+
+Copy /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/Frameworks/XCTAutomationSupport.framework /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.f
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -resolve-src-symlinks /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFramew
+
+Copy /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/Frameworks/Testing.framework /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework (in target 'ViernesUITes
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -resolve-src-symlinks /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Te
+
+CodeSign /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/PlugIns/ViernesUITests.xctest (in target 'ViernesUITests' from project 'Viernes')
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/PlugIns/ViernesUITests.xctest
+
+RegisterExecutionPolicyException /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/PlugIns/ViernesUITests.xctest (in target 'ViernesUITests' from project 'Viernes')
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS
+    builtin-RegisterExecutionPolicyException /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/PlugIns/ViernesUITests.xctest
+
+Touch /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/PlugIns/ViernesUITests.xctest (in target 'ViernesUITests' from project 'Viernes')
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS
+    /usr/bin/touch -c /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app/PlugIns/ViernesUITests.xctest
+
+CodeSign /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app (in target 'ViernesUITests' from project 'Viernes')
+    cd /Users/runner/work/Viernes-iOS/Viernes-iOS
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der /Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app
+/Users/runner/work/Viernes-iOS/Viernes-iOS/build/Build/Products/Debug-iphonesimulator/ViernesUITests-Runner.app: replacing existing signature
+
+** TEST BUILD SUCCEEDED **
+
